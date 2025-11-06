@@ -1,21 +1,22 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 2.9.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.0.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritische Schritt erfordert eine
 # explizite Bestätigung.
 #
+# Hinzugefügte Features v3.0 (Docker JSON-Fix):
+# - KORREKTUR: Docker-Daemon startete nicht wegen ungültigem JSON.
+# - FIX: Der ungültige Schlüssel 'default-address-pools-v6' wurde entfernt.
+# - FIX: IPv4- und IPv6-Pools werden jetzt korrekt im *selben*
+#   'default-address-pools' Array konfiguriert.
+#
 # Hinzugefügte Features v2.9 (Stabile Docker IPv6-ULA-Pools):
 # - KORREKTUR: Ersetzt ungültige '2001:db8::' (Doku-IPs) durch 'fd00::/8' (Private ULA-IPs).
 # - NEU: Docker verwendet jetzt feste, private IPv6-Pools (fd00:db8:1::/64 und fd00:db8:10::/56).
 # - NEU: UFW-Regeln werden automatisch für diese stabilen ULA-Pools hinzugefügt.
-# - ENTFERNT: Die interaktive IPv6-Abfrage (v2.8) ist nicht mehr nötig; IPv6 ist jetzt standardmäßig
-#   mit korrekten privaten Adressen konfiguriert.
-#
-# Hinzugefügte Features v2.8 (Docker IPv6-Fix):
-# - KORREKTUR: Docker-Daemon startete nicht wegen ungültiger '2001:db8:' IPv6-Pools.
 #
 # Unterstützte Distributionen: Ubuntu, Debian, CentOS, RHEL, Fedora, SUSE, Arch
 # Ausführung: sudo bash ./setup_server.sh
@@ -1749,7 +1750,7 @@ EOF
     else
         warning "Erstellung eines neuen Benutzers übersprungen."
         # Fallback, falls kein neuer Benutzer erstellt wird
-        read -p "Bitte geben Sie den Namen eines existierenden sudo-Benutzers an, für den SSH konfiguriSoll der SSH-Dienst gehärtet werden (Port ändern, Key-Auth erzwingen)?ert werden soll: " NEW_USER
+        read -p "Bitte geben Sie den Namen eines existierenden sudo-Benutzers an, für den SSH konfiguriert werden soll: " NEW_USER
         debug "Benutzer-Eingabe für existierenden Benutzer: '$NEW_USER'"
         
         if ! id "$NEW_USER" &>/dev/null; then
@@ -2241,7 +2242,7 @@ EOF
                         fi
 
                         # --- (C) DOCKER DAEMON KONFIGURATION (daemon.json) ---
-                        info "(B) Erstelle $DAEMON_JSON_PATH (v2.9 ULA-Fix)..."
+                        info "(B) Erstelle $DAEMON_JSON_PATH (v3.0 JSON-Fix)..."
                         create_backup "$DAEMON_JSON_PATH"
                         
                         # JSON-Erstellung (v2.7-Fix beibehalten)
@@ -2257,7 +2258,8 @@ EOF
 EOF
                         fi
 
-                        # --- KORREKTUR (v2.9): Korrekte ULA-Pools eintragen ---
+                        # --- KORREKTUR (v3.0): 'default-address-pools-v6' entfernt ---
+                        # --- und in 'default-address-pools' integriert. ---
                         sudo tee -a "$DAEMON_JSON_PATH" > /dev/null <<EOF
   "live-restore": true,
   "metrics-addr": "127.0.0.1:9323",
@@ -2273,9 +2275,7 @@ EOF
     {
       "base": "$IPV4_POOL_BASE",
       "size": $IPV4_POOL_SIZE
-    }
-  ],
-  "default-address-pools-v6": [
+    },
     {
       "base": "$IPV6_POOL_BASE",
       "size": $IPV6_POOL_SIZE
@@ -2309,7 +2309,7 @@ EOF
                         fi
 
                         # --- (F) 'newt_talk' NETZWERK ERSTELLEN (basierend auf neuen Pools) ---
-                        info "(F) Erstelle Docker-Netzwerk 'newt_talk' (v2.9)..."
+                        info "(F) Erstelle Docker-Netzwerk 'newt_talk' (v3.0)..."
                         if docker network ls | grep -q "newt_talk"; then
                              docker network rm newt_talk 2>/dev/null || true
                              debug "Altes 'newt_talk' Netzwerk entfernt."
@@ -2329,10 +2329,10 @@ EOF
                                 --subnet="$NEWT_TALK_IPV4_SUBNET" \
                                 --subnet="$NEWT_TALK_IPV6_SUBNET" \
                                 newt_talk; then
-                            error "Erstellung des 'newt_talk' Netzwerks (v2.9) fehlgeschlagen!"
+                            error "Erstellung des 'newt_talk' Netzwerks (v3.0) fehlgeschlagen!"
                             warning "Möglicherweise überschneiden sich die Subnetze mit bestehenden Netzen."
                         else
-                            success "Docker-Netzwerk 'newt_talk' (v2.9) erfolgreich erstellt."
+                            success "Docker-Netzwerk 'newt_talk' (v3.0) erfolgreich erstellt."
                         fi
                         
                         # --- ENDE: Erweiterte Docker & UFW Konfiguration ---
