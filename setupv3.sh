@@ -782,7 +782,12 @@ C_CYAN='\033[36m'
 
 # Debug-Modus und Logging aktivieren
 DEBUG=${DEBUG:-0}
-LOGFILE="/var/log/server-setup.log"
+
+# NEU (v2.6): Log-Datei im Skript-Verzeichnis erstellen
+# SCRIPT_DIR ermittelt das Verzeichnis, in dem das Skript ausgeführt wird
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+LOGFILE="$SCRIPT_DIR/install.log"
+# ALT: LOGFILE="/var/log/server-setup.log"
 
 # Logging-Setup
 setup_logging() {
@@ -1560,16 +1565,16 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
             success "Benutzer '$NEW_USER' wurde erstellt und zu den Gruppen '$ADMIN_GROUP' und 'remotessh' hinzugefügt."
             
             # Passwort für den Benutzer setzen (optional)
-            if confirm "Möchten Sie ein Passwort für den Benutzer '$NEW_USER' setzen?"; then
-                info "Setzen Sie ein starkes Passwort für '$NEW_USER':"
-                debug "Passwort-Eingabe für Benutzer: $NEW_USER"
-                if ! passwd "$NEW_USER"; then
-                    error "Passwort-Setzung fehlgeschlagen"
-                    exit 1
+            # Auf Debian/Ubuntu wird das Passwort bereits interaktiv von 'adduser' abgefragt.
+            if [ "$OS_ID" != "ubuntu" ] && [ "$OS_ID" != "debian" ]; then
+                if confirm "Möchten Sie ein Passwort für den Benutzer '$NEW_USER' setzen?"; then
+                    info "Setzen Sie ein starkes Passwort für '$NEW_USER':"
+                    success "Passwort für '$NEW_USER' wurde gesetzt."
+                else
+                    info "Kein Passwort gesetzt. Benutzer kann sich nur mit SSH-Schlüssel anmelden."
                 fi
-                success "Passwort für '$NEW_USER' wurde gesetzt."
             else
-                info "Kein Passwort gesetzt. Benutzer kann sich nur mit SSH-Schlüssel anmelden."
+                debug "Überspringe separate Passwortabfrage (wurde von 'adduser' erledigt)"
             fi
             
             # Root-Benutzer wird am Ende des Skripts automatisch deaktiviert
@@ -2184,16 +2189,61 @@ EOF
                             warning "Neuanmeldung erforderlich, damit docker-Gruppe für Benutzer '$NEW_USER' wirksam wird."
                         fi
 
-                        # --- Docker Konfiguration ---
-                        info "Konfiguriere Docker-Daemon für MTU, IPv6 und optimale Kommunikation..."
-                        DOCKER_DAEMON_CONFIG="/etc/docker/daemon.json"
-                        create_backup "$DOCKER_DAEMON_CONFIG"
+                        # --- ANFANG: Erweiterte Docker & UFW Konfiguration (Integration v2.5) ---
+                        # Basierend auf dem vom Benutzer bereitgestellten Skript.
+
+                        info "Konfiguriere UFW, Docker Daemon und Netzwerk-Pools..."
+
+                        # --- (A) Variablen definieren (angepasst an v2.4) ---
+                        # Diese Werte werden jetzt für UFW und daemon.json verwendet
+                        IPV4_POOL_BASE="172.25.0.0/16"
+                        IPV4_POOL_SIZE=24
+                        IPV6_FIXED_CIDR="2001:db8:1::/64"   # Für docker0
+                        IPV6_POOL_BASE="2001:db8:10::/56"  # Für 'newt_talk' und andere
+                        IPV6_POOL_SIZE=64
+                        MTU_VALUE=1450
+                        ENABLE_DATA_ROOT=false # Data-Root wird hier nicht verwaltet
+                        DOCKER_DATA_ROOT="/mnt/dockerdata" # Platzhalter
+                        UFW_DEFAULT_CONFIG="/etc/default/ufw"
+                        DAEMON_JSON_PATH="/etc/docker/daemon.json"
+
+                        # --- (B) UFW GRUNDKONFIGURATION (Forwarding) ---
+                        if [ "$FIREWALL_CMD" = "ufw" ]; then
+                            info "Konfiguriere UFW für Docker-Forwarding..."
+                            if [ -f "$UFW_DEFAULT_CONFIG" ]; then
+                                if grep -q "^DEFAULT_FORWARD_POLICY=\"DROP\"" "$UFW_DEFAULT_CONFIG"; then
+                                    info "Setze UFW DEFAULT_FORWARD_POLICY auf ACCEPT (erforderlich für Docker)"
+                                    sed -i 's/^DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' "$UFW_DEFAULT_CONFIG"
+                                else
+                                    debug "UFW DEFAULT_FORWARD_POLICY ist bereits auf ACCEPT."
+                                fi
+                            else
+                                warning "Konnte $UFW_DEFAULT_CONFIG nicht finden, um Forwarding zu setzen."
+                            fi
+                        else
+                            debug "UFW nicht aktiv, überspringe Forwarding-Policy-Setup."
+                        fi
+
+                        # --- (C) DOCKER DAEMON KONFIGURATION (daemon.json) ---
+                        info "Erstelle $DAEMON_JSON_PATH (v2.5)..."
+                        create_backup "$DAEMON_JSON_PATH"
                         
-                        cat > "$DOCKER_DAEMON_CONFIG" << 'EOF'
+                        # Erzeuge die data-root Zeile dynamisch
+                        if [ "$ENABLE_DATA_ROOT" = true ]; then
+                            DATA_ROOT_LINE="\"data-root\": \"$DOCKER_DATA_ROOT\","
+                        else
+                            DATA_ROOT_LINE="// \"data-root\": \"(Nicht verwaltet)\","
+                        fi
+
+                        sudo tee "$DAEMON_JSON_PATH" > /dev/null <<EOF
 {
-  "mtu": 1450,
+  "mtu": $MTU_VALUE,
+  $DATA_ROOT_LINE
+  "live-restore": true,
+  "metrics-addr": "127.0.0.1:9323",
+  "experimental": true,
   "ipv6": true,
-  "fixed-cidr-v6": "2001:db8:1::/64",
+  "fixed-cidr-v6": "$IPV6_FIXED_CIDR",
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
@@ -2201,25 +2251,71 @@ EOF
   },
   "default-address-pools": [
     {
-      "base": "172.25.0.0/16",
-      "size": 24
+      "base": "$IPV4_POOL_BASE",
+      "size": $IPV4_POOL_SIZE
+    }
+  ],
+  "default-address-pools-v6": [
+    {
+      "base": "$IPV6_POOL_BASE",
+      "size": $IPV6_POOL_SIZE
     }
   ]
 }
 EOF
-                        manage_service restart docker
-                        
-                        info "Erstelle Docker-Netzwerk 'newt_talk'..."
-                        if ! docker network ls | grep -q "newt_talk"; then
-                             docker network create \
-                                --opt com.docker.network.driver.mtu=1450 \
-                                --ipv6 \
-                                --subnet="172.25.1.0/24" \
-                                --subnet="2001:db8:1:1::/80" \
-                                newt_talk
+                        success "$DAEMON_JSON_PATH wurde erfolgreich erstellt."
+
+                        # --- (D) UFW REGELN FÜR POOLS ANWENDEN ---
+                        if [ "$FIREWALL_CMD" = "ufw" ]; then
+                            info "Füge UFW 'allow' Regeln für Docker-Pools hinzu..."
+                            
+                            debug "Erlaube IPv4-Pool: $IPV4_POOL_BASE"
+                            sudo ufw allow from "$IPV4_POOL_BASE" to any
+                            
+                            debug "Erlaube fixes IPv6-Netz (docker0): $IPV6_FIXED_CIDR"
+                            sudo ufw allow from "$IPV6_FIXED_CIDR" to any
+
+                            debug "Erlaube IPv6-Pool (Compose-Netze): $IPV6_POOL_BASE"
+                            sudo ufw allow from "$IPV6_POOL_BASE" to any
+                        fi
+
+                        # --- (E) DIENSTE NEU STARTEN & LADEN ---
+                        info "Starte Docker-Dienst neu, um daemon.json zu laden..."
+                        sudo systemctl restart docker
+
+                        if [ "$FIREWALL_CMD" = "ufw" ]; then
+                            info "Lade UFW-Regeln neu..."
+                            sudo ufw reload
+                        fi
+
+                        # --- (F) 'newt_talk' NETZWERK ERSTELLEN (basierend auf neuen Pools) ---
+                        info "Erstelle Docker-Netzwerk 'newt_talk' (v2.5)..."
+                        if docker network ls | grep -q "newt_talk"; then
+                             docker network rm newt_talk 2>/dev/null || true
+                             debug "Altes 'newt_talk' Netzwerk entfernt."
                         fi
                         
-                        success "Docker-Setup abgeschlossen."
+                        # Definiere die Subnetze für newt_talk (müssen in die Pools passen)
+                        # Wir nehmen das erste /24 aus dem 172.25.0.0/16 Pool
+                        # Und das erste /64 aus dem 2001:db8:10::/56 Pool
+                        local NEWT_TALK_IPV4_SUBNET="172.25.0.0/24" 
+                        local NEWT_TALK_IPV6_SUBNET="2001:db8:10:0::/64" # (Das erste /64 im /56 Pool)
+
+                        debug "Erstelle newt_talk mit IPv4: $NEWT_TALK_IPV4_SUBNET und IPv6: $NEWT_TALK_IPV6_SUBNET"
+                        if ! docker network create \
+                                --opt com.docker.network.driver.mtu=$MTU_VALUE \
+                                --ipv6 \
+                                --subnet="$NEWT_TALK_IPV4_SUBNET" \
+                                --subnet="$NEWT_TALK_IPV6_SUBNET" \
+                                newt_talk; then
+                            error "Erstellung des 'newt_talk' Netzwerks (v2.5) fehlgeschlagen!"
+                            warning "Möglicherweise überschneiden sich die Subnetze mit bestehenden Netzen."
+                        else
+                            success "Docker-Netzwerk 'newt_talk' (v2.5) erfolgreich erstellt."
+                        fi
+                        
+                        # --- ENDE: Erweiterte Docker & UFW Konfiguration ---
+                        
                         break
                         ;;
                     "Prometheus Node Exporter installieren"|"Prometheus Node Exporter (✓ installiert)")
@@ -2436,38 +2532,38 @@ if command -v docker >/dev/null 2>&1 && [[ "${SELECTED_MODULES[optional_software
     echo ""
     info "🧪 Finaler Docker-Netzwerk-Konnektivitätstest..."
     
-    # Test IPv4
-    info "Teste IPv4-Konnektivität aus einem Container..."
-    if docker run --rm --network=newt_talk busybox ping -c 3 8.8.8.8 >/dev/null 2>&1; then
-        success "  -> IPv4-Verbindung nach außen ist erfolgreich!"
+    # --- NEU (v2.5): Test Default Bridge ---
+    info "Teste IPv4-Konnektivität (Default Bridge)..."
+    if docker run --rm busybox ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+        success "  -> [Default] IPv4-Verbindung nach außen ist erfolgreich!"
     else
-        error "  -> IPv4-Verbindung nach außen ist fehlgeschlagen!"
+        error "  -> [Default] IPv4-Verbindung nach außen ist fehlgeschlagen!"
+    fi
+    
+    info "Teste IPv6-Konnektivität (Default Bridge)..."
+    if docker run --rm busybox ping -c 3 ipv6.google.com >/dev/null 2>&1; then
+        success "  -> [Default] IPv6-Verbindung nach außen ist erfolgreich!"
+    else
+        error "  -> [Default] IPv6-Verbindung nach außen ist fehlgeschlagen!"
+        warning "         (Dies kann normal sein, wenn der Host kein IPv6 hat)"
+    fi
+    # --- ENDE NEU ---
+
+    # Test IPv4 (newt_talk)
+    info "Teste IPv4-Konnektivität ('newt_talk' Netzwerk)..."
+    if docker run --rm --network=newt_talk busybox ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+        success "  -> [newt_talk] IPv4-Verbindung nach außen ist erfolgreich!"
+    else
+        error "  -> [newt_talk] IPv4-Verbindung nach außen ist fehlgeschlagen!"
         warning "         Bitte überprüfen Sie Ihre Docker-Netzwerkkonfiguration und Firewall-Regeln."
     fi
 
-    # Test IPv6
-    info "Teste IPv6-Konnektivität aus einem Container..."
+    # Test IPv6 (newt_talk)
+    info "Teste IPv6-Konnektivität ('newt_talk' Netzwerk)..."
     if docker run --rm --network=newt_talk busybox ping -c 3 ipv6.google.com >/dev/null 2>&1; then
-        success "  -> IPv6-Verbindung nach außen ist erfolgreich!"
+        success "  -> [newt_talk] IPv6-Verbindung nach außen ist erfolgreich!"
     else
-        error "  -> IPv6-Verbindung nach außen ist fehlgeschlagen!"
-        warning "         Dies kann normal sein, wenn Ihr Host/Provider kein IPv6 unterstützt."
-        warning "         Überprüfen Sie die Docker-Daemon-Konfiguration ('ipv6': true)."
-    fi
-fi
-
-info "📋 Setup-Log wurde gespeichert unter: $LOGFILE"
-debug "Setup-Skript erfolgreich abgeschlossen für $OS_NAME"
-
-echo ""
-echo -e "${C_YELLOW}===================================================================${C_RESET}"
-echo -e "${C_YELLOW}Der Server sollte nun neu gestartet werden, um alle Änderungen zu übernehmen.${C_RESET}"
-echo -e "${C_YELLOW}===================================================================${C_RESET}"
-echo ""
-read -p "Drücken Sie [ENTER], um den Server jetzt neu zu starten, oder STRG+C zum Abbrechen..."
-
-info "Server-Neustart wird eingeleitet..."
-log_action "REBOOT" "Server reboot initiated by script"
+        error "  -> [newt_talk] IPv6-Verbindung nach außen ist fehlgeschlagen!"
 reboot
 
 
