@@ -1,21 +1,26 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 2.4.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 2.7.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritische Schritt erfordert eine
 # explizite Bestätigung.
 #
-# Hinzugefügte Features v2.4.0 (Integration von v2.3):
-# - (Wunsch) Interaktive Abfrage in `setup_firewall`, ob Ports für
-#   HTTP (80), HTTPS (443), Pangolin (51820/udp, 21820/udp) und
-#   Komodo (8120/tcp) geöffnet werden sollen.
-# - Basiert auf dem vollständigen Skript v2.1.
+# Hinzugefügte Features v2.7 (Fehlerbehebungen):
+# - Korrektur: JSON-Kommentare in daemon.json entfernt (verhinderte Docker-Start).
+# - Korrektur: 'local'-Variable außerhalb einer Funktion entfernt (Shell-Fehler).
+# - Korrektur: Fehlendes 'fi' am Skriptende hinzugefügt (Syntax-Fehler).
 #
-# Hinzugefügte Features v2.1:
-# - Menü für optionale Software erlaubt nun die Auswahl mehrerer Pakete nacheinander.
-# - Zusätzliche optionale Software: NGINX, Prometheus Node Exporter, ncdu, tmux, DB-Clients.
+# Hinzugefügte Features v2.6 (Logging):
+# - Log-Datei wird jetzt als 'install.log' im Skript-Verzeichnis gespeichert.
+#
+# Hinzugefügte Features v2.5 (Docker & UFW Integration):
+# - Integration der robusten Docker/UFW-Konfiguration (Forwarding, Pools).
+# - Finaler Test prüft jetzt Default Bridge UND 'newt_talk' (IPv4/v6).
+#
+# Hinzugefügte Features v2.4 (Interaktivität):
+# - Interaktive Abfrage in `setup_firewall` für HTTP, Pangolin, Komodo.
 #
 # Unterstützte Distributionen: Ubuntu, Debian, CentOS, RHEL, Fedora, SUSE, Arch
 # Ausführung: sudo bash ./setup_server.sh
@@ -1569,6 +1574,10 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
             if [ "$OS_ID" != "ubuntu" ] && [ "$OS_ID" != "debian" ]; then
                 if confirm "Möchten Sie ein Passwort für den Benutzer '$NEW_USER' setzen?"; then
                     info "Setzen Sie ein starkes Passwort für '$NEW_USER':"
+                    if ! passwd "$NEW_USER"; then
+                        error "Passwort-Setzung fehlgeschlagen"
+                        exit 1
+                    fi
                     success "Passwort für '$NEW_USER' wurde gesetzt."
                 else
                     info "Kein Passwort gesetzt. Benutzer kann sich nur mit SSH-Schlüssel anmelden."
@@ -2141,46 +2150,48 @@ EOF
                         # Erst prüfen ob Docker bereits installiert ist
                         if command -v docker >/dev/null 2>&1; then
                             success "Docker ist bereits installiert: $(docker --version)"
-                            info "✓ Keine weitere Aktion erforderlich."
-                            break
+                            info "✓ Führe Konfiguration erneut aus..."
+                            # Nicht 'break', damit Konfiguration unten läuft
                         fi
                         
-                        case "$OS_ID" in
-                            ubuntu|debian)
-                                info "Installiere Docker über offizielles Repository..."
-                                install_package "apt-transport-https ca-certificates curl gnupg lsb-release"
-                                curl -fsSL https://download.docker.com/linux/$OS_ID/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-                                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$OS_ID $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-                                $PKG_UPDATE
-                                install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-                                ;;
-                            centos|rhel|rocky|almalinux)
-                                info "Installiere Docker über yum/dnf Repository..."
-                                if [ "$PKG_MANAGER" = "dnf" ]; then
-                                    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-                                else
-                                    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-                                fi
-                                install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-                                ;;
-                            fedora)
-                                info "Installiere Docker über dnf Repository..."
-                                dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-                                install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-                                ;;
-                            *)
-                                error "Docker-Installation für $OS_ID nicht über offizielles Repo unterstützt. Versuche Standard-Paket."
-                                install_package "docker.io docker-compose" || install_package "docker"
-                                ;;
-                        esac
-                        
-                        manage_service enable docker
-                        manage_service start docker
-
-                        # Docker-Installation verifizieren
                         if ! command -v docker >/dev/null 2>&1; then
-                             error "Docker-Installation fehlgeschlagen"
-                             break
+                            case "$OS_ID" in
+                                ubuntu|debian)
+                                    info "Installiere Docker über offizielles Repository..."
+                                    install_package "apt-transport-https ca-certificates curl gnupg lsb-release"
+                                    curl -fsSL https://download.docker.com/linux/$OS_ID/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+                                    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$OS_ID $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                                    $PKG_UPDATE
+                                    install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                                    ;;
+                                centos|rhel|rocky|almalinux)
+                                    info "Installiere Docker über yum/dnf Repository..."
+                                    if [ "$PKG_MANAGER" = "dnf" ]; then
+                                        dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                                    else
+                                        yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                                    fi
+                                    install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                                    ;;
+                                fedora)
+                                    info "Installiere Docker über dnf Repository..."
+                                    dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+                                    install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                                    ;;
+                                *)
+                                    error "Docker-Installation für $OS_ID nicht über offizielles Repo unterstützt. Versuche Standard-Paket."
+                                    install_package "docker.io docker-compose" || install_package "docker"
+                                    ;;
+                            esac
+                            
+                            manage_service enable docker
+                            manage_service start docker
+
+                            # Docker-Installation verifizieren
+                            if ! command -v docker >/dev/null 2>&1; then
+                                error "Docker-Installation fehlgeschlagen"
+                                break
+                            fi
                         fi
 
                         if [ -n "$NEW_USER" ]; then
@@ -2209,7 +2220,7 @@ EOF
 
                         # --- (B) UFW GRUNDKONFIGURATION (Forwarding) ---
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "Konfiguriere UFW für Docker-Forwarding..."
+                            info "(A) Konfiguriere UFW für Docker-Forwarding..."
                             if [ -f "$UFW_DEFAULT_CONFIG" ]; then
                                 if grep -q "^DEFAULT_FORWARD_POLICY=\"DROP\"" "$UFW_DEFAULT_CONFIG"; then
                                     info "Setze UFW DEFAULT_FORWARD_POLICY auf ACCEPT (erforderlich für Docker)"
@@ -2225,20 +2236,25 @@ EOF
                         fi
 
                         # --- (C) DOCKER DAEMON KONFIGURATION (daemon.json) ---
-                        info "Erstelle $DAEMON_JSON_PATH (v2.5)..."
+                        info "(B) Erstelle $DAEMON_JSON_PATH (v2.7)..."
                         create_backup "$DAEMON_JSON_PATH"
                         
-                        # Erzeuge die data-root Zeile dynamisch
-                        if [ "$ENABLE_DATA_ROOT" = true ]; then
-                            DATA_ROOT_LINE="\"data-root\": \"$DOCKER_DATA_ROOT\","
-                        else
-                            DATA_ROOT_LINE="// \"data-root\": \"(Nicht verwaltet)\","
-                        fi
-
+                        # --- KORREKTUR (v2.7): JSON-Erstellung ---
+                        # JSON erlaubt keine Kommentare, daher wird der 'tee'-Befehl
+                        # aufgeteilt, um die 'data-root' Zeile nur bei Bedarf einzufügen.
+                        
                         sudo tee "$DAEMON_JSON_PATH" > /dev/null <<EOF
 {
   "mtu": $MTU_VALUE,
-  $DATA_ROOT_LINE
+EOF
+
+                        if [ "$ENABLE_DATA_ROOT" = true ]; then
+                            sudo tee -a "$DAEMON_JSON_PATH" > /dev/null <<EOF
+  "data-root": "$DOCKER_DATA_ROOT",
+EOF
+                        fi
+
+                        sudo tee -a "$DAEMON_JSON_PATH" > /dev/null <<EOF
   "live-restore": true,
   "metrics-addr": "127.0.0.1:9323",
   "experimental": true,
@@ -2267,7 +2283,7 @@ EOF
 
                         # --- (D) UFW REGELN FÜR POOLS ANWENDEN ---
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "Füge UFW 'allow' Regeln für Docker-Pools hinzu..."
+                            info "(C) Füge UFW 'allow' Regeln für Docker-Pools hinzu..."
                             
                             debug "Erlaube IPv4-Pool: $IPV4_POOL_BASE"
                             sudo ufw allow from "$IPV4_POOL_BASE" to any
@@ -2280,16 +2296,16 @@ EOF
                         fi
 
                         # --- (E) DIENSTE NEU STARTEN & LADEN ---
-                        info "Starte Docker-Dienst neu, um daemon.json zu laden..."
+                        info "(D) Starte Docker-Dienst neu, um daemon.json zu laden..."
                         sudo systemctl restart docker
 
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "Lade UFW-Regeln neu..."
+                            info "(E) Lade UFW-Regeln neu..."
                             sudo ufw reload
                         fi
 
                         # --- (F) 'newt_talk' NETZWERK ERSTELLEN (basierend auf neuen Pools) ---
-                        info "Erstelle Docker-Netzwerk 'newt_talk' (v2.5)..."
+                        info "(F) Erstelle Docker-Netzwerk 'newt_talk' (v2.7)..."
                         if docker network ls | grep -q "newt_talk"; then
                              docker network rm newt_talk 2>/dev/null || true
                              debug "Altes 'newt_talk' Netzwerk entfernt."
@@ -2298,8 +2314,10 @@ EOF
                         # Definiere die Subnetze für newt_talk (müssen in die Pools passen)
                         # Wir nehmen das erste /24 aus dem 172.25.0.0/16 Pool
                         # Und das erste /64 aus dem 2001:db8:10::/56 Pool
-                        local NEWT_TALK_IPV4_SUBNET="172.25.0.0/24" 
-                        local NEWT_TALK_IPV6_SUBNET="2001:db8:10:0::/64" # (Das erste /64 im /56 Pool)
+                        
+                        # --- KORREKTUR (v2.7): 'local' entfernt ---
+                        NEWT_TALK_IPV4_SUBNET="172.25.0.0/24" 
+                        NEWT_TALK_IPV6_SUBNET="2001:db8:10:0::/64" # (Das erste /64 im /56 Pool)
 
                         debug "Erstelle newt_talk mit IPv4: $NEWT_TALK_IPV4_SUBNET und IPv6: $NEWT_TALK_IPV6_SUBNET"
                         if ! docker network create \
@@ -2308,10 +2326,10 @@ EOF
                                 --subnet="$NEWT_TALK_IPV4_SUBNET" \
                                 --subnet="$NEWT_TALK_IPV6_SUBNET" \
                                 newt_talk; then
-                            error "Erstellung des 'newt_talk' Netzwerks (v2.5) fehlgeschlagen!"
+                            error "Erstellung des 'newt_talk' Netzwerks (v2.7) fehlgeschlagen!"
                             warning "Möglicherweise überschneiden sich die Subnetze mit bestehenden Netzen."
                         else
-                            success "Docker-Netzwerk 'newt_talk' (v2.5) erfolgreich erstellt."
+                            success "Docker-Netzwerk 'newt_talk' (v2.7) erfolgreich erstellt."
                         fi
                         
                         # --- ENDE: Erweiterte Docker & UFW Konfiguration ---
@@ -2564,6 +2582,24 @@ if command -v docker >/dev/null 2>&1 && [[ "${SELECTED_MODULES[optional_software
         success "  -> [newt_talk] IPv6-Verbindung nach außen ist erfolgreich!"
     else
         error "  -> [newt_talk] IPv6-Verbindung nach außen ist fehlgeschlagen!"
+    fi
+    # --- ENDE NEU ---
+
+# --- KORREKTUR (v2.7): Fehlendes 'fi' und 'reboot'-Logik hinzugefügt ---
+fi
+
+info "📋 Setup-Log wurde gespeichert unter: $LOGFILE"
+debug "Setup-Skript erfolgreich abgeschlossen für $OS_NAME"
+
+echo ""
+echo -e "${C_YELLOW}===================================================================${C_RESET}"
+echo -e "${C_YELLOW}Der Server sollte nun neu gestartet werden, um alle Änderungen zu übernehmen.${C_RESET}"
+echo -e "${C_YELLOW}===================================================================${C_RESET}"
+echo ""
+read -p "Drücken Sie [ENTER], um den Server jetzt neu zu starten, oder STRG+C zum Abbrechen..."
+
+info "Server-Neustart wird eingeleitet..."
+log_action "REBOOT" "Server reboot initiated by script"
 reboot
 
 
