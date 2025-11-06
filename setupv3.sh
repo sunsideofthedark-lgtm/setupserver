@@ -1,26 +1,21 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 2.7.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 2.9.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritische Schritt erfordert eine
 # explizite Bestätigung.
 #
-# Hinzugefügte Features v2.7 (Fehlerbehebungen):
-# - Korrektur: JSON-Kommentare in daemon.json entfernt (verhinderte Docker-Start).
-# - Korrektur: 'local'-Variable außerhalb einer Funktion entfernt (Shell-Fehler).
-# - Korrektur: Fehlendes 'fi' am Skriptende hinzugefügt (Syntax-Fehler).
+# Hinzugefügte Features v2.9 (Stabile Docker IPv6-ULA-Pools):
+# - KORREKTUR: Ersetzt ungültige '2001:db8::' (Doku-IPs) durch 'fd00::/8' (Private ULA-IPs).
+# - NEU: Docker verwendet jetzt feste, private IPv6-Pools (fd00:db8:1::/64 und fd00:db8:10::/56).
+# - NEU: UFW-Regeln werden automatisch für diese stabilen ULA-Pools hinzugefügt.
+# - ENTFERNT: Die interaktive IPv6-Abfrage (v2.8) ist nicht mehr nötig; IPv6 ist jetzt standardmäßig
+#   mit korrekten privaten Adressen konfiguriert.
 #
-# Hinzugefügte Features v2.6 (Logging):
-# - Log-Datei wird jetzt als 'install.log' im Skript-Verzeichnis gespeichert.
-#
-# Hinzugefügte Features v2.5 (Docker & UFW Integration):
-# - Integration der robusten Docker/UFW-Konfiguration (Forwarding, Pools).
-# - Finaler Test prüft jetzt Default Bridge UND 'newt_talk' (IPv4/v6).
-#
-# Hinzugefügte Features v2.4 (Interaktivität):
-# - Interaktive Abfrage in `setup_firewall` für HTTP, Pangolin, Komodo.
+# Hinzugefügte Features v2.8 (Docker IPv6-Fix):
+# - KORREKTUR: Docker-Daemon startete nicht wegen ungültiger '2001:db8:' IPv6-Pools.
 #
 # Unterstützte Distributionen: Ubuntu, Debian, CentOS, RHEL, Fedora, SUSE, Arch
 # Ausführung: sudo bash ./setup_server.sh
@@ -793,6 +788,9 @@ DEBUG=${DEBUG:-0}
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOGFILE="$SCRIPT_DIR/install.log"
 # ALT: LOGFILE="/var/log/server-setup.log"
+
+# Globale Variable für Docker IPv6-Status (NEU v2.8)
+DOCKER_IPV6_ENABLED=false
 
 # Logging-Setup
 setup_logging() {
@@ -1751,7 +1749,7 @@ EOF
     else
         warning "Erstellung eines neuen Benutzers übersprungen."
         # Fallback, falls kein neuer Benutzer erstellt wird
-        read -p "Bitte geben Sie den Namen eines existierenden sudo-Benutzers an, für den SSH konfiguriert werden soll: " NEW_USER
+        read -p "Bitte geben Sie den Namen eines existierenden sudo-Benutzers an, für den SSH konfiguriSoll der SSH-Dienst gehärtet werden (Port ändern, Key-Auth erzwingen)?ert werden soll: " NEW_USER
         debug "Benutzer-Eingabe für existierenden Benutzer: '$NEW_USER'"
         
         if ! id "$NEW_USER" &>/dev/null; then
@@ -2200,23 +2198,30 @@ EOF
                             warning "Neuanmeldung erforderlich, damit docker-Gruppe für Benutzer '$NEW_USER' wirksam wird."
                         fi
 
-                        # --- ANFANG: Erweiterte Docker & UFW Konfiguration (Integration v2.5) ---
-                        # Basierend auf dem vom Benutzer bereitgestellten Skript.
+                        # --- ANFANG: Erweiterte Docker & UFW Konfiguration (Integration v2.9) ---
+                        # KORREKTUR: Verwendet stabile ULA-Adressen (fd00::/8) statt Doku-Adressen (2001:db8::)
 
                         info "Konfiguriere UFW, Docker Daemon und Netzwerk-Pools..."
 
-                        # --- (A) Variablen definieren (angepasst an v2.4) ---
+                        # --- (A) Variablen definieren (v2.9 ULA-FIX) ---
                         # Diese Werte werden jetzt für UFW und daemon.json verwendet
                         IPV4_POOL_BASE="172.25.0.0/16"
                         IPV4_POOL_SIZE=24
-                        IPV6_FIXED_CIDR="2001:db8:1::/64"   # Für docker0
-                        IPV6_POOL_BASE="2001:db8:10::/56"  # Für 'newt_talk' und andere
+                        
+                        # --- NEU (v2.9): Stabile Private ULA IPv6-Adressen ---
+                        # Dies sind die korrekten privaten Adressen, die Docker nicht am Start hindern.
+                        IPV6_FIXED_CIDR="fd00:db8:1::/64"   # Für docker0
+                        IPV6_POOL_BASE="fd00:db8:10::/56"  # Für 'newt_talk' und andere
                         IPV6_POOL_SIZE=64
+                        
                         MTU_VALUE=1450
                         ENABLE_DATA_ROOT=false # Data-Root wird hier nicht verwaltet
                         DOCKER_DATA_ROOT="/mnt/dockerdata" # Platzhalter
                         UFW_DEFAULT_CONFIG="/etc/default/ufw"
                         DAEMON_JSON_PATH="/etc/docker/daemon.json"
+                        
+                        # Globale Variable setzen, da wir IPv6 jetzt standardmäßig (und korrekt) aktivieren
+                        DOCKER_IPV6_ENABLED=true 
 
                         # --- (B) UFW GRUNDKONFIGURATION (Forwarding) ---
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
@@ -2236,12 +2241,10 @@ EOF
                         fi
 
                         # --- (C) DOCKER DAEMON KONFIGURATION (daemon.json) ---
-                        info "(B) Erstelle $DAEMON_JSON_PATH (v2.7)..."
+                        info "(B) Erstelle $DAEMON_JSON_PATH (v2.9 ULA-Fix)..."
                         create_backup "$DAEMON_JSON_PATH"
                         
-                        # --- KORREKTUR (v2.7): JSON-Erstellung ---
-                        # JSON erlaubt keine Kommentare, daher wird der 'tee'-Befehl
-                        # aufgeteilt, um die 'data-root' Zeile nur bei Bedarf einzufügen.
+                        # JSON-Erstellung (v2.7-Fix beibehalten)
                         
                         sudo tee "$DAEMON_JSON_PATH" > /dev/null <<EOF
 {
@@ -2254,6 +2257,7 @@ EOF
 EOF
                         fi
 
+                        # --- KORREKTUR (v2.9): Korrekte ULA-Pools eintragen ---
                         sudo tee -a "$DAEMON_JSON_PATH" > /dev/null <<EOF
   "live-restore": true,
   "metrics-addr": "127.0.0.1:9323",
@@ -2283,7 +2287,7 @@ EOF
 
                         # --- (D) UFW REGELN FÜR POOLS ANWENDEN ---
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "(C) Füge UFW 'allow' Regeln für Docker-Pools hinzu..."
+                            info "(C) Füge UFW 'allow' Regeln für Docker-Pools hinzu (ULA-Fix)..."
                             
                             debug "Erlaube IPv4-Pool: $IPV4_POOL_BASE"
                             sudo ufw allow from "$IPV4_POOL_BASE" to any
@@ -2305,7 +2309,7 @@ EOF
                         fi
 
                         # --- (F) 'newt_talk' NETZWERK ERSTELLEN (basierend auf neuen Pools) ---
-                        info "(F) Erstelle Docker-Netzwerk 'newt_talk' (v2.7)..."
+                        info "(F) Erstelle Docker-Netzwerk 'newt_talk' (v2.9)..."
                         if docker network ls | grep -q "newt_talk"; then
                              docker network rm newt_talk 2>/dev/null || true
                              debug "Altes 'newt_talk' Netzwerk entfernt."
@@ -2313,11 +2317,10 @@ EOF
                         
                         # Definiere die Subnetze für newt_talk (müssen in die Pools passen)
                         # Wir nehmen das erste /24 aus dem 172.25.0.0/16 Pool
-                        # Und das erste /64 aus dem 2001:db8:10::/56 Pool
+                        # Und das erste /64 aus dem fd00:db8:10::/56 Pool
                         
-                        # --- KORREKTUR (v2.7): 'local' entfernt ---
                         NEWT_TALK_IPV4_SUBNET="172.25.0.0/24" 
-                        NEWT_TALK_IPV6_SUBNET="2001:db8:10:0::/64" # (Das erste /64 im /56 Pool)
+                        NEWT_TALK_IPV6_SUBNET="fd00:db8:10:0::/64" # (Das erste /64 im /56 Pool)
 
                         debug "Erstelle newt_talk mit IPv4: $NEWT_TALK_IPV4_SUBNET und IPv6: $NEWT_TALK_IPV6_SUBNET"
                         if ! docker network create \
@@ -2326,10 +2329,10 @@ EOF
                                 --subnet="$NEWT_TALK_IPV4_SUBNET" \
                                 --subnet="$NEWT_TALK_IPV6_SUBNET" \
                                 newt_talk; then
-                            error "Erstellung des 'newt_talk' Netzwerks (v2.7) fehlgeschlagen!"
+                            error "Erstellung des 'newt_talk' Netzwerks (v2.9) fehlgeschlagen!"
                             warning "Möglicherweise überschneiden sich die Subnetze mit bestehenden Netzen."
                         else
-                            success "Docker-Netzwerk 'newt_talk' (v2.7) erfolgreich erstellt."
+                            success "Docker-Netzwerk 'newt_talk' (v2.9) erfolgreich erstellt."
                         fi
                         
                         # --- ENDE: Erweiterte Docker & UFW Konfiguration ---
@@ -2550,7 +2553,7 @@ if command -v docker >/dev/null 2>&1 && [[ "${SELECTED_MODULES[optional_software
     echo ""
     info "🧪 Finaler Docker-Netzwerk-Konnektivitätstest..."
     
-    # --- NEU (v2.5): Test Default Bridge ---
+    # --- Test Default Bridge ---
     info "Teste IPv4-Konnektivität (Default Bridge)..."
     if docker run --rm busybox ping -c 3 8.8.8.8 >/dev/null 2>&1; then
         success "  -> [Default] IPv4-Verbindung nach außen ist erfolgreich!"
@@ -2558,14 +2561,18 @@ if command -v docker >/dev/null 2>&1 && [[ "${SELECTED_MODULES[optional_software
         error "  -> [Default] IPv4-Verbindung nach außen ist fehlgeschlagen!"
     fi
     
-    info "Teste IPv6-Konnektivität (Default Bridge)..."
-    if docker run --rm busybox ping -c 3 ipv6.google.com >/dev/null 2>&1; then
-        success "  -> [Default] IPv6-Verbindung nach außen ist erfolgreich!"
+    # --- KORREKTUR (v2.8): Teste nur IPv6, wenn es in der daemon.json aktiviert wurde ---
+    if [ "$DOCKER_IPV6_ENABLED" = true ]; then
+        info "Teste IPv6-Konnektivität (Default Bridge)..."
+        if docker run --rm busybox ping -c 3 ipv6.google.com >/dev/null 2>&1; then
+            success "  -> [Default] IPv6-Verbindung nach außen ist erfolgreich!"
+        else
+            error "  -> [Default] IPv6-Verbindung nach außen ist fehlgeschlagen!"
+            warning "         (Dies kann normal sein, wenn der Host kein IPv6 hat)"
+        fi
     else
-        error "  -> [Default] IPv6-Verbindung nach außen ist fehlgeschlagen!"
-        warning "         (Dies kann normal sein, wenn der Host kein IPv6 hat)"
+        info "⏭️  Überspringe IPv6-Test (in daemon.json deaktiviert)"
     fi
-    # --- ENDE NEU ---
 
     # Test IPv4 (newt_talk)
     info "Teste IPv4-Konnektivität ('newt_talk' Netzwerk)..."
@@ -2576,16 +2583,16 @@ if command -v docker >/dev/null 2>&1 && [[ "${SELECTED_MODULES[optional_software
         warning "         Bitte überprüfen Sie Ihre Docker-Netzwerkkonfiguration und Firewall-Regeln."
     fi
 
-    # Test IPv6 (newt_talk)
-    info "Teste IPv6-Konnektivität ('newt_talk' Netzwerk)..."
-    if docker run --rm --network=newt_talk busybox ping -c 3 ipv6.google.com >/dev/null 2>&1; then
-        success "  -> [newt_talk] IPv6-Verbindung nach außen ist erfolgreich!"
-    else
-        error "  -> [newt_talk] IPv6-Verbindung nach außen ist fehlgeschlagen!"
+    # --- KORREKTUR (v2.8): Teste nur IPv6, wenn es in der daemon.json aktiviert wurde ---
+    if [ "$DOCKER_IPV6_ENABLED" = true ]; then
+        info "Teste IPv6-Konnektivität ('newt_talk' Netzwerk)..."
+        if docker run --rm --network=newt_talk busybox ping -c 3 ipv6.google.com >/dev/null 2>&1; then
+            success "  -> [newt_talk] IPv6-Verbindung nach außen ist erfolgreich!"
+        else
+            error "  -> [newt_talk] IPv6-Verbindung nach außen ist fehlgeschlagen!"
+        fi
     fi
-    # --- ENDE NEU ---
 
-# --- KORREKTUR (v2.7): Fehlendes 'fi' und 'reboot'-Logik hinzugefügt ---
 fi
 
 info "📋 Setup-Log wurde gespeichert unter: $LOGFILE"
