@@ -535,3 +535,8 @@ EOF
 # HINWEIS: Das ursprüngliche Skript endete hier abrupt.
 # Ich habe den Code bis zu diesem Punkt beibehalten.
 # Wenn dein Skript weitergeht, fehlen diese Teile hier.
+
+    # --- HINZUGEFÜGTE KORREKTUREN ---
+    esac
+}
+# --- ENDE DER KORREKTUREN ---
