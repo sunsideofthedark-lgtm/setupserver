@@ -1,11 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.0.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.1.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
-# Absicherung eines neuen Servers. Jeder kritische Schritt erfordert eine
+# Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
+#
+# Hinzugefügte Features v3.1 (Tailscale Integration):
+# - NEU: Tailscale VPN Installation und Konfiguration
+# - NEU: Automatische SSH und Exit Node Aktivierung
+# - NEU: Optionale Subnet Router Konfiguration
+# - NEU: Optionale Tag-Zuweisung für ACLs
 #
 # Hinzugefügte Features v3.0 (Docker JSON-Fix):
 # - KORREKTUR: Docker-Daemon startete nicht wegen ungültigem JSON.
@@ -2081,6 +2087,17 @@ if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
             fi
             echo ""
 
+            # --- VPN & NETWORKING ---
+            echo -e "${C_YELLOW}🌐 VPN & Networking:${C_RESET}"
+            if command -v tailscale >/dev/null 2>&1; then
+                options+=("Tailscale (✓ installiert)")
+                echo -e " 15. ${C_GREEN}Tailscale${C_RESET}: Mesh-VPN mit Exit Node & SSH $STATUS_INSTALLED"
+            else
+                options+=("Tailscale installieren")
+                echo -e " 15. ${C_GREEN}Tailscale${C_RESET}: Mesh-VPN mit Exit Node & SSH $STATUS_AVAILABLE"
+            fi
+            echo ""
+
             options+=("Fertig")
 
             PS3="Ihre Wahl (oder 'Fertig' zum Beenden): "
@@ -2408,6 +2425,220 @@ EOF
                         ;;
                     "zip/unzip installieren"|"zip/unzip (✓ installiert)")
                         install_package "zip unzip" && success "zip/unzip installiert." || error "Installation fehlgeschlagen."
+                        break
+                        ;;
+                    "Tailscale installieren"|"Tailscale (✓ installiert)")
+                        info "Installiere und konfiguriere Tailscale..."
+                        debug "Starte Tailscale-Installation"
+                        log_action "TAILSCALE" "Starting Tailscale installation"
+
+                        # Prüfen ob bereits installiert
+                        if command -v tailscale >/dev/null 2>&1; then
+                            success "Tailscale ist bereits installiert: $(tailscale version 2>/dev/null | head -1)"
+                            info "Führe Konfiguration erneut aus..."
+                        fi
+
+                        # Tailscale installieren falls nicht vorhanden
+                        if ! command -v tailscale >/dev/null 2>&1; then
+                            info "Installiere Tailscale über offizielles Repository..."
+
+                            case "$OS_ID" in
+                                ubuntu|debian)
+                                    # Ubuntu/Debian: Offizielles Tailscale Repo
+                                    install_package "curl gnupg"
+                                    curl -fsSL https://pkgs.tailscale.com/stable/$OS_ID/$(lsb_release -sc).noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+                                    curl -fsSL https://pkgs.tailscale.com/stable/$OS_ID/$(lsb_release -sc).tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+                                    $PKG_UPDATE
+                                    install_package "tailscale"
+                                    ;;
+                                centos|rhel|rocky|almalinux)
+                                    # RHEL/CentOS
+                                    install_package "curl"
+                                    cat > /etc/yum.repos.d/tailscale.repo << 'TSREPO'
+[tailscale-stable]
+name=Tailscale stable
+baseurl=https://pkgs.tailscale.com/stable/rhel/$releasever/$basearch
+enabled=1
+type=rpm
+gpgcheck=1
+gpgkey=https://pkgs.tailscale.com/stable/rhel/$releasever/repo.gpg
+TSREPO
+                                    install_package "tailscale"
+                                    ;;
+                                fedora)
+                                    # Fedora
+                                    install_package "curl"
+                                    cat > /etc/yum.repos.d/tailscale.repo << 'TSREPO'
+[tailscale-stable]
+name=Tailscale stable
+baseurl=https://pkgs.tailscale.com/stable/fedora/$releasever/$basearch
+enabled=1
+type=rpm
+gpgcheck=1
+gpgkey=https://pkgs.tailscale.com/stable/fedora/$releasever/repo.gpg
+TSREPO
+                                    install_package "tailscale"
+                                    ;;
+                                opensuse*|sles)
+                                    # openSUSE/SLES
+                                    zypper ar -g -r https://pkgs.tailscale.com/stable/opensuse/tailscale.repo
+                                    install_package "tailscale"
+                                    ;;
+                                arch)
+                                    # Arch Linux
+                                    install_package "tailscale"
+                                    ;;
+                                *)
+                                    warning "Kein offizielles Repo für $OS_ID. Versuche universelle Installation..."
+                                    install_package "curl"
+                                    curl -fsSL https://tailscale.com/install.sh | sh
+                                    ;;
+                            esac
+
+                            # Installation verifizieren
+                            if ! command -v tailscale >/dev/null 2>&1; then
+                                error "Tailscale-Installation fehlgeschlagen"
+                                log_action "TAILSCALE" "Installation failed"
+                                break
+                            fi
+
+                            success "Tailscale erfolgreich installiert."
+                        fi
+
+                        # systemd Service aktivieren
+                        info "Aktiviere Tailscale systemd Service..."
+                        systemctl enable tailscaled
+                        systemctl start tailscaled
+
+                        # === TAILSCALE KONFIGURATION ===
+                        info ""
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo -e "${C_CYAN}  Tailscale Konfiguration${C_RESET}"
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo ""
+
+                        # Auth-Key abfragen
+                        echo -e "${C_YELLOW}Um Tailscale zu aktivieren, benötigen Sie einen Auth-Key.${C_RESET}"
+                        echo -e "${C_BLUE}Erstellen Sie einen Key unter: https://login.tailscale.com/admin/settings/keys${C_RESET}"
+                        echo ""
+                        echo -e "Key-Typ Empfehlung: ${C_GREEN}Reusable${C_RESET} (wiederverwendbar) für Server"
+                        echo ""
+                        read -p "Bitte geben Sie Ihren Tailscale Auth-Key ein: " TS_AUTH_KEY
+
+                        if [ -z "$TS_AUTH_KEY" ]; then
+                            error "Auth-Key ist erforderlich. Tailscale wird nicht konfiguriert."
+                            log_action "TAILSCALE" "No auth key provided"
+                            break
+                        fi
+
+                        debug "Auth-Key erhalten (Länge: ${#TS_AUTH_KEY})"
+
+                        # Basis-Kommando zusammenstellen
+                        # SSH und Exit Node sind IMMER aktiviert
+                        TS_HOSTNAME=$(hostname)
+                        TS_CMD="tailscale up --auth-key=$TS_AUTH_KEY --ssh --advertise-exit-node --hostname=$TS_HOSTNAME"
+
+                        info ""
+                        echo -e "${C_GREEN}Standard-Konfiguration:${C_RESET}"
+                        echo "  ✅ Tailscale SSH: Aktiviert"
+                        echo "  ✅ Exit Node: Wird advertised"
+                        echo "  ✅ Hostname: $TS_HOSTNAME"
+                        echo ""
+
+                        # Optional: Subnet Router
+                        TS_ADVERTISE_ROUTES=""
+                        if ask_yes_no "Soll dieser Server als Subnet Router fungieren? (Lokales Netzwerk über Tailscale erreichbar machen)" "n"; then
+                            echo ""
+                            echo -e "${C_YELLOW}Beispiele für Subnet Routes:${C_RESET}"
+                            echo "  • 192.168.1.0/24  - Heimnetzwerk (254 IPs)"
+                            echo "  • 10.0.0.0/8      - Großes Firmennetzwerk"
+                            echo "  • 172.16.0.0/12   - Private Netzwerke"
+                            echo ""
+                            read -p "Geben Sie die zu advertisende CIDR ein (z.B. 192.168.1.0/24): " TS_ADVERTISE_ROUTES
+
+                            if [ -n "$TS_ADVERTISE_ROUTES" ]; then
+                                TS_CMD="$TS_CMD --advertise-routes=$TS_ADVERTISE_ROUTES"
+                                info "Subnet Router: $TS_ADVERTISE_ROUTES"
+                            fi
+                        fi
+
+                        # Optional: Tags
+                        TS_TAGS=""
+                        if ask_yes_no "Möchten Sie Tags für diesen Node setzen? (Für ACL-Kontrolle)" "n"; then
+                            echo ""
+                            echo -e "${C_YELLOW}Beispiele für Tags:${C_RESET}"
+                            echo "  • tag:server    - Server-Tag"
+                            echo "  • tag:prod      - Produktions-Tag"
+                            echo "  • tag:exit-node - Exit-Node-Tag"
+                            echo ""
+                            read -p "Geben Sie Tags ein (komma-getrennt, z.B. tag:server,tag:prod): " TS_TAGS
+
+                            if [ -n "$TS_TAGS" ]; then
+                                TS_CMD="$TS_CMD --advertise-tags=$TS_TAGS"
+                                info "Tags: $TS_TAGS"
+                            fi
+                        fi
+
+                        # Tailscale starten
+                        echo ""
+                        info "Verbinde mit Tailscale..."
+                        debug "Ausführung: tailscale up (mit Optionen)"
+
+                        if eval $TS_CMD; then
+                            success "✅ Tailscale erfolgreich verbunden!"
+                            log_action "TAILSCALE" "Successfully connected to tailnet"
+                        else
+                            error "Tailscale-Verbindung fehlgeschlagen"
+                            log_action "TAILSCALE" "Connection failed"
+                            warning "Prüfen Sie ob der Auth-Key gültig ist."
+                            break
+                        fi
+
+                        # Status anzeigen
+                        echo ""
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo -e "${C_GREEN}  Tailscale Status${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+
+                        # IP-Adressen anzeigen
+                        TS_IPV4=$(tailscale ip -4 2>/dev/null)
+                        TS_IPV6=$(tailscale ip -6 2>/dev/null)
+
+                        echo ""
+                        echo -e "${C_BLUE}Tailscale IP-Adressen:${C_RESET}"
+                        echo "  IPv4: $TS_IPV4"
+                        echo "  IPv6: $TS_IPV6"
+                        echo ""
+                        echo -e "${C_BLUE}Verbindungsdetails:${C_RESET}"
+                        echo "  Hostname: $TS_HOSTNAME"
+                        echo "  SSH: Aktiviert (tailscale ssh <user>@$TS_HOSTNAME)"
+                        echo "  Exit Node: Wird advertised (muss in Admin-Console approved werden)"
+
+                        if [ -n "$TS_ADVERTISE_ROUTES" ]; then
+                            echo "  Subnet Routes: $TS_ADVERTISE_ROUTES (muss in Admin-Console approved werden)"
+                        fi
+
+                        if [ -n "$TS_TAGS" ]; then
+                            echo "  Tags: $TS_TAGS"
+                        fi
+
+                        echo ""
+                        echo -e "${C_YELLOW}Wichtige Hinweise:${C_RESET}"
+                        echo "  • Exit Node muss in der Admin-Console approved werden:"
+                        echo "    https://login.tailscale.com/admin/machines"
+                        echo "  • Subnet Routes müssen ebenfalls approved werden"
+                        echo "  • Tailscale SSH verwendet Ihre Tailscale-Identität"
+                        echo ""
+
+                        # Firewall-Regeln für Tailscale (falls UFW aktiv)
+                        if [ "$FIREWALL_CMD" = "ufw" ]; then
+                            info "Konfiguriere UFW für Tailscale..."
+                            # Tailscale Interface erlauben
+                            ufw allow in on tailscale0 2>/dev/null || true
+                            success "UFW-Regeln für Tailscale konfiguriert."
+                        fi
+
+                        log_action "TAILSCALE" "Installation and configuration completed"
                         break
                         ;;
                     "Fertig")

@@ -4,7 +4,7 @@
 
 | Eigenschaft | Wert |
 |-------------|------|
-| **Version** | 3.0.0 |
+| **Version** | 3.1.0 |
 | **Dateiname** | `setupv3.sh` |
 | **Zweck** | Universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servern |
 | **Log-Datei** | `./install.log` |
@@ -184,6 +184,44 @@ Das Skript bietet ein **modulares Menüsystem** mit 9 Konfigurationsmodulen.
 | PostgreSQL Client | Datenbank-CLI |
 | git | Versionskontrolle |
 | zip/unzip | Archivierungs-Tools |
+
+#### VPN & Networking
+
+| Paket | Beschreibung |
+|-------|--------------|
+| Tailscale | Mesh-VPN mit Exit Node & SSH |
+
+---
+
+### Tailscale-Konfiguration (Detail)
+
+**Automatisch aktivierte Features:**
+
+| Feature | Flag | Beschreibung |
+|---------|------|--------------|
+| Tailscale SSH | `--ssh` | SSH über Tailscale-Identität |
+| Exit Node | `--advertise-exit-node` | Server als Exit Node anbieten |
+| Hostname | `--hostname` | Automatisch vom System übernommen |
+
+**Optionale Features:**
+
+| Feature | Flag | Beschreibung |
+|---------|------|--------------|
+| Subnet Router | `--advertise-routes=<CIDR>` | Lokales Netzwerk über Tailscale erreichbar |
+| Tags | `--advertise-tags=<tags>` | ACL-Tags für Zugriffskontrolle |
+
+**Beispiel-Subnet-Routes:**
+- `192.168.1.0/24` - Heimnetzwerk (254 IPs)
+- `10.0.0.0/8` - Großes Firmennetzwerk
+- `172.16.0.0/12` - Private Netzwerke
+
+**Nach der Installation:**
+1. Exit Node in Admin-Console approving: `https://login.tailscale.com/admin/machines`
+2. Subnet Routes ebenfalls approving falls konfiguriert
+3. Verbindung testen: `tailscale status`
+
+**UFW-Integration:**
+- Tailscale Interface (`tailscale0`) wird automatisch erlaubt
 
 ---
 
@@ -367,6 +405,7 @@ ssh -i /pfad/zum/privaten/schlüssel -p <PORT> <USER>@<SERVER_IP>
 
 | Version | Änderungen |
 |---------|------------|
+| 3.1.0 | Tailscale Integration: VPN mit SSH, Exit Node, Subnet Router, Tags |
 | 3.0.0 | Docker JSON-Fix: `default-address-pools-v6` entfernt, IPv4/IPv6 in einem Array |
 | 2.9.0 | Stabile Docker IPv6-ULA-Pools (`fd00::/8` statt `2001:db8::`) |
 | 2.8.0 | Docker IPv6-Status-Erkennung |
