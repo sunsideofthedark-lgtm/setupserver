@@ -1,11 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.1.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.2.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
+#
+# Hinzugefügte Features v3.2 (Docker Auto-Install & Komodo):
+# - NEU: Docker und Docker Compose werden automatisch installiert
+# - NEU: Komodo Periphery Agent als Option (Docker-Compose in /opt/komodo)
+# - NEU: Komodo kann an Tailscale IP gebunden werden
+# - FIX: Docker daemon.json Konfiguration automatisch beim ersten Start
 #
 # Hinzugefügte Features v3.1 (Tailscale Integration):
 # - NEU: Tailscale VPN Installation und Konfiguration
@@ -1964,17 +1970,145 @@ echo ""
 
 if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
     info "Schritt 7: Optionale Software installieren"
+
+    # === DOCKER AUTOMATISCH INSTALLIEREN (v3.2) ===
+    info "Prüfe Docker-Installation..."
+    if command -v docker >/dev/null 2>&1; then
+        success "Docker ist bereits installiert: $(docker --version)"
+    else
+        info "Installiere Docker und Docker Compose automatisch..."
+        debug "Starte Docker-Installation"
+        log_action "DOCKER" "Starting automatic Docker installation"
+
+        case "$OS_ID" in
+            ubuntu|debian)
+                info "Installiere Docker über offizielles Repository..."
+                install_package "apt-transport-https ca-certificates curl gnupg lsb-release"
+                curl -fsSL https://download.docker.com/linux/$OS_ID/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$OS_ID $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                $PKG_UPDATE
+                install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                ;;
+            centos|rhel|rocky|almalinux)
+                info "Installiere Docker über yum/dnf Repository..."
+                if [ "$PKG_MANAGER" = "dnf" ]; then
+                    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                else
+                    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+                fi
+                install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                ;;
+            fedora)
+                info "Installiere Docker über dnf Repository..."
+                dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+                install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+                ;;
+            *)
+                warning "Docker-Installation für $OS_ID nicht über offizielles Repo unterstützt. Versuche Standard-Paket."
+                install_package "docker.io docker-compose" || install_package "docker"
+                ;;
+        esac
+
+        manage_service enable docker
+        manage_service start docker
+
+        # Docker-Installation verifizieren
+        if command -v docker >/dev/null 2>&1; then
+            success "✅ Docker erfolgreich installiert: $(docker --version)"
+            log_action "DOCKER" "Docker installed successfully"
+
+            # Docker-Konfiguration (daemon.json)
+            info "Konfiguriere Docker Daemon..."
+            DAEMON_JSON_PATH="/etc/docker/daemon.json"
+            create_backup "$DAEMON_JSON_PATH"
+
+            IPV4_POOL_BASE="172.25.0.0/16"
+            IPV4_POOL_SIZE=24
+            IPV6_FIXED_CIDR="fd00:db8:1::/64"
+            IPV6_POOL_BASE="fd00:db8:10::/56"
+            IPV6_POOL_SIZE=64
+            MTU_VALUE=1450
+
+            sudo tee "$DAEMON_JSON_PATH" > /dev/null <<EOF
+{
+  "mtu": $MTU_VALUE,
+  "live-restore": true,
+  "metrics-addr": "127.0.0.1:9323",
+  "experimental": true,
+  "ipv6": true,
+  "fixed-cidr-v6": "$IPV6_FIXED_CIDR",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "default-address-pools": [
+    {
+      "base": "$IPV4_POOL_BASE",
+      "size": $IPV4_POOL_SIZE
+    },
+    {
+      "base": "$IPV6_POOL_BASE",
+      "size": $IPV6_POOL_SIZE
+    }
+  ]
+}
+EOF
+            success "Docker daemon.json konfiguriert."
+
+            # UFW für Docker konfigurieren
+            if [ "$FIREWALL_CMD" = "ufw" ]; then
+                info "Konfiguriere UFW für Docker..."
+                if [ -f "/etc/default/ufw" ]; then
+                    sed -i 's/^DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+                fi
+                sudo ufw allow from "$IPV4_POOL_BASE" to any
+                sudo ufw allow from "$IPV6_FIXED_CIDR" to any
+                sudo ufw allow from "$IPV6_POOL_BASE" to any
+                sudo ufw reload
+                success "UFW für Docker konfiguriert."
+            fi
+
+            # Docker neu starten
+            sudo systemctl restart docker
+            DOCKER_IPV6_ENABLED=true
+
+            # newt_talk Netzwerk erstellen
+            info "Erstelle Docker-Netzwerk 'newt_talk'..."
+            docker network rm newt_talk 2>/dev/null || true
+            if docker network create \
+                    --opt com.docker.network.driver.mtu=$MTU_VALUE \
+                    --ipv6 \
+                    --subnet="172.25.0.0/24" \
+                    --subnet="fd00:db8:10:0::/64" \
+                    newt_talk; then
+                success "Docker-Netzwerk 'newt_talk' erstellt."
+            fi
+
+            # Benutzer zur docker-Gruppe hinzufügen
+            if [ -n "$NEW_USER" ]; then
+                usermod -aG docker "$NEW_USER"
+                success "Benutzer '$NEW_USER' zur docker-Gruppe hinzugefügt."
+                warning "Neuanmeldung erforderlich für docker-Gruppe."
+            fi
+        else
+            error "Docker-Installation fehlgeschlagen"
+            log_action "DOCKER" "Docker installation failed"
+        fi
+    fi
+
+    echo ""
     if confirm "Möchten Sie zusätzliche Software aus einer Liste auswählen?"; then
-        
+
         while true; do
             echo ""
             echo -e "${C_BLUE}📦 Verfügbare optionale Software-Pakete:${C_RESET}"
             echo ""
-            
+
             # Status-Indikatoren definieren
             STATUS_INSTALLED="${C_GREEN}✓ [INSTALLIERT]${C_RESET}"
             STATUS_AVAILABLE="${C_YELLOW}○ [VERFÜGBAR]${C_RESET}"
-        
+
             # Dynamische Options-Liste mit Status-Anzeige
             options=()
 
@@ -1997,22 +2131,19 @@ if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
                 echo -e "  3. ${C_GREEN}ClamAV${C_RESET}: Antivirus-Scanner für Server $STATUS_AVAILABLE"
             fi
             echo ""
-            
+
             # --- WEB & CONTAINER ---
             echo -e "${C_YELLOW}🌐 Web & Container:${C_RESET}"
-             if is_package_installed "nginx" "nginx"; then
+            if is_package_installed "nginx" "nginx"; then
                 options+=("NGINX (✓ installiert)")
                 echo -e "  4. ${C_GREEN}NGINX${C_RESET}: Hochleistungs-Webserver & Reverse Proxy $STATUS_INSTALLED"
             else
                 options+=("NGINX installieren")
                 echo -e "  4. ${C_GREEN}NGINX${C_RESET}: Hochleistungs-Webserver & Reverse Proxy $STATUS_AVAILABLE"
             fi
-            if is_package_installed "docker" "docker" || is_package_installed "docker.io" "docker"; then
-                options+=("Docker (✓ installiert)")
-                echo -e "  5. ${C_GREEN}Docker${C_RESET}: Container-Plattform für Anwendungen $STATUS_INSTALLED"
-            else
-                options+=("Docker installieren")
-                echo -e "  5. ${C_GREEN}Docker${C_RESET}: Container-Plattform für Anwendungen $STATUS_AVAILABLE"
+            # Docker wird automatisch installiert - nur Status anzeigen
+            if command -v docker >/dev/null 2>&1; then
+                echo -e "  5. ${C_GREEN}Docker${C_RESET}: Container-Plattform ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
             fi
             echo ""
             
@@ -2096,6 +2227,14 @@ if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
                 options+=("Tailscale installieren")
                 echo -e " 15. ${C_GREEN}Tailscale${C_RESET}: Mesh-VPN mit Exit Node & SSH $STATUS_AVAILABLE"
             fi
+            # Komodo Periphery Agent
+            if docker ps 2>/dev/null | grep -q "komodo-periphery"; then
+                options+=("Komodo Periphery (✓ installiert)")
+                echo -e " 16. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_INSTALLED"
+            else
+                options+=("Komodo Periphery installieren")
+                echo -e " 16. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
+            fi
             echo ""
 
             options+=("Fertig")
@@ -2152,208 +2291,6 @@ EOF
                         else
                             warning "NGINX ist bereits installiert."
                         fi
-                        break
-                        ;;
-                    "Docker installieren"|"Docker (✓ installiert)")
-                        # Der Docker-Installationsprozess ist sehr lang.
-                        # Er wird hier aus Gründen der Übersichtlichkeit ausgelassen.
-                        # Der Code aus der vorherigen Version wird hier eingefügt.
-                        info "Führe Docker-Installation und Konfiguration durch..."
-                        
-                        # --- Docker Installation ---
-                        debug "Installation von Docker"
-                        
-                        # Erst prüfen ob Docker bereits installiert ist
-                        if command -v docker >/dev/null 2>&1; then
-                            success "Docker ist bereits installiert: $(docker --version)"
-                            info "✓ Führe Konfiguration erneut aus..."
-                            # Nicht 'break', damit Konfiguration unten läuft
-                        fi
-                        
-                        if ! command -v docker >/dev/null 2>&1; then
-                            case "$OS_ID" in
-                                ubuntu|debian)
-                                    info "Installiere Docker über offizielles Repository..."
-                                    install_package "apt-transport-https ca-certificates curl gnupg lsb-release"
-                                    curl -fsSL https://download.docker.com/linux/$OS_ID/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-                                    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$OS_ID $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-                                    $PKG_UPDATE
-                                    install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-                                    ;;
-                                centos|rhel|rocky|almalinux)
-                                    info "Installiere Docker über yum/dnf Repository..."
-                                    if [ "$PKG_MANAGER" = "dnf" ]; then
-                                        dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-                                    else
-                                        yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-                                    fi
-                                    install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-                                    ;;
-                                fedora)
-                                    info "Installiere Docker über dnf Repository..."
-                                    dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
-                                    install_package "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-                                    ;;
-                                *)
-                                    error "Docker-Installation für $OS_ID nicht über offizielles Repo unterstützt. Versuche Standard-Paket."
-                                    install_package "docker.io docker-compose" || install_package "docker"
-                                    ;;
-                            esac
-                            
-                            manage_service enable docker
-                            manage_service start docker
-
-                            # Docker-Installation verifizieren
-                            if ! command -v docker >/dev/null 2>&1; then
-                                error "Docker-Installation fehlgeschlagen"
-                                break
-                            fi
-                        fi
-
-                        if [ -n "$NEW_USER" ]; then
-                            usermod -aG docker "$NEW_USER"
-                            success "Docker installiert. Benutzer '$NEW_USER' wurde zur docker-Gruppe hinzugefügt."
-                            warning "Neuanmeldung erforderlich, damit docker-Gruppe für Benutzer '$NEW_USER' wirksam wird."
-                        fi
-
-                        # --- ANFANG: Erweiterte Docker & UFW Konfiguration (Integration v2.9) ---
-                        # KORREKTUR: Verwendet stabile ULA-Adressen (fd00::/8) statt Doku-Adressen (2001:db8::)
-
-                        info "Konfiguriere UFW, Docker Daemon und Netzwerk-Pools..."
-
-                        # --- (A) Variablen definieren (v2.9 ULA-FIX) ---
-                        # Diese Werte werden jetzt für UFW und daemon.json verwendet
-                        IPV4_POOL_BASE="172.25.0.0/16"
-                        IPV4_POOL_SIZE=24
-                        
-                        # --- NEU (v2.9): Stabile Private ULA IPv6-Adressen ---
-                        # Dies sind die korrekten privaten Adressen, die Docker nicht am Start hindern.
-                        IPV6_FIXED_CIDR="fd00:db8:1::/64"   # Für docker0
-                        IPV6_POOL_BASE="fd00:db8:10::/56"  # Für 'newt_talk' und andere
-                        IPV6_POOL_SIZE=64
-                        
-                        MTU_VALUE=1450
-                        ENABLE_DATA_ROOT=false # Data-Root wird hier nicht verwaltet
-                        DOCKER_DATA_ROOT="/mnt/dockerdata" # Platzhalter
-                        UFW_DEFAULT_CONFIG="/etc/default/ufw"
-                        DAEMON_JSON_PATH="/etc/docker/daemon.json"
-                        
-                        # Globale Variable setzen, da wir IPv6 jetzt standardmäßig (und korrekt) aktivieren
-                        DOCKER_IPV6_ENABLED=true 
-
-                        # --- (B) UFW GRUNDKONFIGURATION (Forwarding) ---
-                        if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "(A) Konfiguriere UFW für Docker-Forwarding..."
-                            if [ -f "$UFW_DEFAULT_CONFIG" ]; then
-                                if grep -q "^DEFAULT_FORWARD_POLICY=\"DROP\"" "$UFW_DEFAULT_CONFIG"; then
-                                    info "Setze UFW DEFAULT_FORWARD_POLICY auf ACCEPT (erforderlich für Docker)"
-                                    sed -i 's/^DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' "$UFW_DEFAULT_CONFIG"
-                                else
-                                    debug "UFW DEFAULT_FORWARD_POLICY ist bereits auf ACCEPT."
-                                fi
-                            else
-                                warning "Konnte $UFW_DEFAULT_CONFIG nicht finden, um Forwarding zu setzen."
-                            fi
-                        else
-                            debug "UFW nicht aktiv, überspringe Forwarding-Policy-Setup."
-                        fi
-
-                        # --- (C) DOCKER DAEMON KONFIGURATION (daemon.json) ---
-                        info "(B) Erstelle $DAEMON_JSON_PATH (v3.0 JSON-Fix)..."
-                        create_backup "$DAEMON_JSON_PATH"
-                        
-                        # JSON-Erstellung (v2.7-Fix beibehalten)
-                        
-                        sudo tee "$DAEMON_JSON_PATH" > /dev/null <<EOF
-{
-  "mtu": $MTU_VALUE,
-EOF
-
-                        if [ "$ENABLE_DATA_ROOT" = true ]; then
-                            sudo tee -a "$DAEMON_JSON_PATH" > /dev/null <<EOF
-  "data-root": "$DOCKER_DATA_ROOT",
-EOF
-                        fi
-
-                        # --- KORREKTUR (v3.0): 'default-address-pools-v6' entfernt ---
-                        # --- und in 'default-address-pools' integriert. ---
-                        sudo tee -a "$DAEMON_JSON_PATH" > /dev/null <<EOF
-  "live-restore": true,
-  "metrics-addr": "127.0.0.1:9323",
-  "experimental": true,
-  "ipv6": true,
-  "fixed-cidr-v6": "$IPV6_FIXED_CIDR",
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "10m",
-    "max-file": "3"
-  },
-  "default-address-pools": [
-    {
-      "base": "$IPV4_POOL_BASE",
-      "size": $IPV4_POOL_SIZE
-    },
-    {
-      "base": "$IPV6_POOL_BASE",
-      "size": $IPV6_POOL_SIZE
-    }
-  ]
-}
-EOF
-                        success "$DAEMON_JSON_PATH wurde erfolgreich erstellt."
-
-                        # --- (D) UFW REGELN FÜR POOLS ANWENDEN ---
-                        if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "(C) Füge UFW 'allow' Regeln für Docker-Pools hinzu (ULA-Fix)..."
-                            
-                            debug "Erlaube IPv4-Pool: $IPV4_POOL_BASE"
-                            sudo ufw allow from "$IPV4_POOL_BASE" to any
-                            
-                            debug "Erlaube fixes IPv6-Netz (docker0): $IPV6_FIXED_CIDR"
-                            sudo ufw allow from "$IPV6_FIXED_CIDR" to any
-
-                            debug "Erlaube IPv6-Pool (Compose-Netze): $IPV6_POOL_BASE"
-                            sudo ufw allow from "$IPV6_POOL_BASE" to any
-                        fi
-
-                        # --- (E) DIENSTE NEU STARTEN & LADEN ---
-                        info "(D) Starte Docker-Dienst neu, um daemon.json zu laden..."
-                        sudo systemctl restart docker
-
-                        if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            info "(E) Lade UFW-Regeln neu..."
-                            sudo ufw reload
-                        fi
-
-                        # --- (F) 'newt_talk' NETZWERK ERSTELLEN (basierend auf neuen Pools) ---
-                        info "(F) Erstelle Docker-Netzwerk 'newt_talk' (v3.0)..."
-                        if docker network ls | grep -q "newt_talk"; then
-                             docker network rm newt_talk 2>/dev/null || true
-                             debug "Altes 'newt_talk' Netzwerk entfernt."
-                        fi
-                        
-                        # Definiere die Subnetze für newt_talk (müssen in die Pools passen)
-                        # Wir nehmen das erste /24 aus dem 172.25.0.0/16 Pool
-                        # Und das erste /64 aus dem fd00:db8:10::/56 Pool
-                        
-                        NEWT_TALK_IPV4_SUBNET="172.25.0.0/24" 
-                        NEWT_TALK_IPV6_SUBNET="fd00:db8:10:0::/64" # (Das erste /64 im /56 Pool)
-
-                        debug "Erstelle newt_talk mit IPv4: $NEWT_TALK_IPV4_SUBNET und IPv6: $NEWT_TALK_IPV6_SUBNET"
-                        if ! docker network create \
-                                --opt com.docker.network.driver.mtu=$MTU_VALUE \
-                                --ipv6 \
-                                --subnet="$NEWT_TALK_IPV4_SUBNET" \
-                                --subnet="$NEWT_TALK_IPV6_SUBNET" \
-                                newt_talk; then
-                            error "Erstellung des 'newt_talk' Netzwerks (v3.0) fehlgeschlagen!"
-                            warning "Möglicherweise überschneiden sich die Subnetze mit bestehenden Netzen."
-                        else
-                            success "Docker-Netzwerk 'newt_talk' (v3.0) erfolgreich erstellt."
-                        fi
-                        
-                        # --- ENDE: Erweiterte Docker & UFW Konfiguration ---
-                        
                         break
                         ;;
                     "Prometheus Node Exporter installieren"|"Prometheus Node Exporter (✓ installiert)")
@@ -2639,6 +2576,151 @@ TSREPO
                         fi
 
                         log_action "TAILSCALE" "Installation and configuration completed"
+                        break
+                        ;;
+                    "Komodo Periphery installieren"|"Komodo Periphery (✓ installiert)")
+                        info "Installiere Komodo Periphery Agent..."
+                        debug "Starte Komodo Periphery Installation"
+                        log_action "KOMODO" "Starting Komodo Periphery installation"
+
+                        # Prüfen ob Docker installiert ist
+                        if ! command -v docker >/dev/null 2>&1; then
+                            error "Docker ist für Komodo Periphery erforderlich!"
+                            error "Bitte installieren Sie zuerst Docker (wird automatisch mit diesem Modul installiert)."
+                            log_action "KOMODO" "Docker not installed"
+                            break
+                        fi
+
+                        # Prüfen ob bereits läuft
+                        if docker ps 2>/dev/null | grep -q "komodo-periphery"; then
+                            success "Komodo Periphery Agent läuft bereits."
+                            info "Führe Konfiguration erneut aus..."
+                        fi
+
+                        echo ""
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo -e "${C_CYAN}  Komodo Periphery Agent Konfiguration${C_RESET}"
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo ""
+
+                        # Bind IP ermitteln (Tailscale oder alle Interfaces)
+                        KOMODO_BIND_IP="0.0.0.0"
+                        if command -v tailscale >/dev/null 2>&1; then
+                            TS_IP=$(tailscale ip -4 2>/dev/null)
+                            if [ -n "$TS_IP" ]; then
+                                echo -e "${C_GREEN}Tailscale erkannt! IPv4: $TS_IP${C_RESET}"
+                                echo ""
+                                if ask_yes_no "Soll Komodo nur über Tailscale erreichbar sein? (Empfohlen für Sicherheit)" "y"; then
+                                    KOMODO_BIND_IP="$TS_IP"
+                                    info "Komodo wird an Tailscale IP gebunden: $KOMODO_BIND_IP"
+                                else
+                                    info "Komodo wird an allen Interfaces erreichbar sein (0.0.0.0)"
+                                fi
+                            fi
+                        fi
+
+                        # Passkey abfragen
+                        echo ""
+                        echo -e "${C_YELLOW}Der Passkey sichert die Kommunikation zwischen Komodo Core und Periphery.${C_RESET}"
+                        echo -e "${C_BLUE}Erstellen Sie einen Passkey in Ihrer Komodo Core Instanz.${C_RESET}"
+                        echo ""
+                        read -p "Bitte geben Sie den Komodo Passkey ein: " KOMODO_PASSKEY
+
+                        if [ -z "$KOMODO_PASSKEY" ]; then
+                            error "Passkey ist erforderlich. Installation abgebrochen."
+                            log_action "KOMODO" "No passkey provided"
+                            break
+                        fi
+
+                        debug "Passkey erhalten (Länge: ${#KOMODO_PASSKEY})"
+
+                        # Verzeichnis erstellen
+                        KOMODO_DIR="/opt/komodo"
+                        info "Erstelle Komodo Verzeichnis: $KOMODO_DIR"
+                        mkdir -p "$KOMODO_DIR/stacks"
+                        mkdir -p "$KOMODO_DIR/compose"
+
+                        # Docker Compose Datei erstellen
+                        info "Erstelle Docker Compose Konfiguration..."
+                        cat > "$KOMODO_DIR/docker-compose.yml" << EOF
+services:
+  komodo-agent:
+    image: ghcr.io/moghtech/komodo-periphery:latest
+    labels:
+      komodo.skip:
+    restart: unless-stopped
+    container_name: komodo-periphery
+    environment:
+      PERIPHERY_ROOT_DIRECTORY: /opt/komodo
+      PERIPHERY_PASSKEYS: "$KOMODO_PASSKEY"
+      PERIPHERY_SSL_ENABLED: true
+      PERIPHERY_DISABLE_TERMINALS: false
+      PERIPHERY_INCLUDE_DISK_MOUNTS: /opt/
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      - /opt:/opt
+    ports:
+      - $KOMODO_BIND_IP:8120:8120
+EOF
+
+                        success "Docker Compose Datei erstellt: $KOMODO_DIR/docker-compose.yml"
+
+                        # Komodo starten
+                        echo ""
+                        info "Starte Komodo Periphery Agent..."
+                        cd "$KOMODO_DIR"
+
+                        if docker compose up -d; then
+                            success "✅ Komodo Periphery Agent erfolgreich gestartet!"
+                            log_action "KOMODO" "Periphery agent started successfully"
+
+                            # Kurz warten und Status prüfen
+                            sleep 3
+                            if docker ps | grep -q "komodo-periphery"; then
+                                success "Container läuft: $(docker ps --filter name=komodo-periphery --format '{{.Status}}')"
+                            fi
+                        else
+                            error "Komodo Periphery Agent konnte nicht gestartet werden."
+                            log_action "KOMODO" "Failed to start container"
+                            break
+                        fi
+
+                        # Status anzeigen
+                        echo ""
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo -e "${C_GREEN}  Komodo Periphery Status${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo ""
+                        echo -e "${C_BLUE}Verbindungsdetails:${C_RESET}"
+                        echo "  Bind IP: $KOMODO_BIND_IP:8120"
+                        echo "  Passkey: $KOMODO_PASSKEY"
+                        echo ""
+
+                        if [ "$KOMODO_BIND_IP" != "0.0.0.0" ]; then
+                            echo -e "${C_GREEN}Komodo ist nur über Tailscale erreichbar.${C_RESET}"
+                            echo "  URL: http://$KOMODO_BIND_IP:8120"
+                        else
+                            echo -e "${C_YELLOW}WARNUNG: Komodo ist an allen Interfaces erreichbar!${C_RESET}"
+                            echo "  Stellen Sie sicher, dass Port 8120 durch Firewall geschützt ist."
+                        fi
+
+                        echo ""
+                        echo -e "${C_YELLOW}Nächste Schritte:${C_RESET}"
+                        echo "  1. Gehen Sie zu Ihrer Komodo Core Instanz"
+                        echo "  2. Fügen Sie diesen Server hinzu mit:"
+                        echo "     - Address: $KOMODO_BIND_IP:8120"
+                        echo "     - Passkey: $KOMODO_PASSKEY"
+                        echo ""
+
+                        # Firewall-Regeln für Komodo
+                        if [ "$FIREWALL_CMD" = "ufw" ] && [ "$KOMODO_BIND_IP" = "0.0.0.0" ]; then
+                            info "Öffne Port 8120 in UFW..."
+                            ufw allow 8120/tcp
+                            success "Port 8120/tcp geöffnet."
+                        fi
+
+                        log_action "KOMODO" "Installation completed"
                         break
                         ;;
                     "Fertig")

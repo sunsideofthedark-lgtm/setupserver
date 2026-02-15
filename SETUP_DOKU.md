@@ -4,9 +4,9 @@
 
 | Eigenschaft | Wert |
 |-------------|------|
-| **Version** | 3.1.0 |
+| **Version** | 3.2.0 |
 | **Dateiname** | `setupv3.sh` |
-| **Zweck** | Universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servern |
+| **Zweck** | Universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servers |
 | **Log-Datei** | `./install.log` |
 
 ## Unterstützte Betriebssysteme
@@ -190,6 +190,65 @@ Das Skript bietet ein **modulares Menüsystem** mit 9 Konfigurationsmodulen.
 | Paket | Beschreibung |
 |-------|--------------|
 | Tailscale | Mesh-VPN mit Exit Node & SSH |
+| Komodo Periphery | Docker-Verwaltung über Komodo Core |
+
+---
+
+### Docker-Installation (v3.2 - Automatisch)
+
+**Ab Version 3.2 wird Docker automatisch installiert**, wenn das Modul "Optionale Software" gewählt wird.
+
+**Automatische Konfiguration:**
+- Docker CE + Docker Compose Plugin
+- `daemon.json` mit IPv6-Unterstützung
+- UFW-Forwarding für Docker
+- Netzwerk `newt_talk` wird erstellt
+- Benutzer wird zur `docker`-Gruppe hinzugefügt
+
+---
+
+### Komodo Periphery Agent (Detail)
+
+**Installationspfad:** `/opt/komodo/`
+
+**Dateien:**
+- `/opt/komodo/docker-compose.yml` - Docker Compose Konfiguration
+- `/opt/komodo/stacks/` - Stack-Konfigurationen
+- `/opt/komodo/compose/` - Compose-Dateien
+
+**Konfiguration:**
+
+| Option | Beschreibung |
+|--------|--------------|
+| Passkey | Erforderlich für Core-Verbindung |
+| Bind IP | Tailscale IP (empfohlen) oder 0.0.0.0 |
+| Port | 8120 (Standard) |
+
+**Tailscale-Integration:**
+- Erkennt automatisch Tailscale IP
+- Empfiehlt Bindung an Tailscale Interface für Sicherheit
+- Nur über VPN erreichbar wenn Tailscale IP gewählt
+
+**docker-compose.yml Beispiel:**
+```yaml
+services:
+  komodo-agent:
+    image: ghcr.io/moghtech/komodo-periphery:latest
+    restart: unless-stopped
+    container_name: komodo-periphery
+    environment:
+      PERIPHERY_ROOT_DIRECTORY: /opt/komodo
+      PERIPHERY_PASSKEYS: "YOUR_PASSKEY"
+      PERIPHERY_SSL_ENABLED: true
+      PERIPHERY_DISABLE_TERMINALS: false
+      PERIPHERY_INCLUDE_DISK_MOUNTS: /opt/
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      - /opt:/opt
+    ports:
+      - 100.x.x.x:8120:8120  # Tailscale IP
+```
 
 ---
 
@@ -405,6 +464,7 @@ ssh -i /pfad/zum/privaten/schlüssel -p <PORT> <USER>@<SERVER_IP>
 
 | Version | Änderungen |
 |---------|------------|
+| 3.2.0 | Docker Auto-Install, Komodo Periphery Agent, Tailscale IP Binding |
 | 3.1.0 | Tailscale Integration: VPN mit SSH, Exit Node, Subnet Router, Tags |
 | 3.0.0 | Docker JSON-Fix: `default-address-pools-v6` entfernt, IPv4/IPv6 in einem Array |
 | 2.9.0 | Stabile Docker IPv6-ULA-Pools (`fd00::/8` statt `2001:db8::`) |
