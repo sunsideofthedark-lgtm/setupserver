@@ -2642,7 +2642,7 @@ TSREPO
 
                         # Docker Compose Datei erstellen
                         info "Erstelle Docker Compose Konfiguration..."
-                        cat > "$KOMODO_DIR/docker-compose.yml" << EOF
+                        cat > "$KOMODO_DIR/compose.yml" << EOF
 services:
   komodo-agent:
     image: ghcr.io/moghtech/komodo-periphery:latest
@@ -2664,7 +2664,7 @@ services:
       - $KOMODO_BIND_IP:8120:8120
 EOF
 
-                        success "Docker Compose Datei erstellt: $KOMODO_DIR/docker-compose.yml"
+                        success "Docker Compose Datei erstellt: $KOMODO_DIR/compose.yml"
 
                         # Komodo starten
                         echo ""

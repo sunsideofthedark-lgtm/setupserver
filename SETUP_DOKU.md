@@ -212,7 +212,7 @@ Das Skript bietet ein **modulares Menüsystem** mit 9 Konfigurationsmodulen.
 **Installationspfad:** `/opt/komodo/`
 
 **Dateien:**
-- `/opt/komodo/docker-compose.yml` - Docker Compose Konfiguration
+- `/opt/komodo/compose.yml` - Docker Compose Konfiguration
 - `/opt/komodo/stacks/` - Stack-Konfigurationen
 - `/opt/komodo/compose/` - Compose-Dateien
 
