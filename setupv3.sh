@@ -1,11 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.3.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.4.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
+#
+# Hinzugefügte Features v3.4 (Sicherheit & Validierung):
+# - NEU: mask_secret() - Sensible Daten werden im Log maskiert
+# - NEU: validate_cidr() - CIDR-Notation wird validiert
+# - NEU: validate_tags() - Tailscale Tags werden validiert
+# - NEU: validate_passkey() - Komodo Passkey Mindestlänge (20 Zeichen)
+# - FIX: Tailscale Status-Anzeige verbessert (IPv4 + IPv6)
 #
 # Hinzugefügte Features v3.3 (Auto-Install Erweitert):
 # - NEU: Docker, Node.js/npm und Tailscale werden automatisch installiert
@@ -271,7 +278,7 @@ setup_firewall() {
 manage_service() {
     local action=$1
     local service=$2
-    
+
     case "$SERVICE_MANAGER" in
         systemctl)
             systemctl $action $service
@@ -284,6 +291,78 @@ manage_service() {
             return 1
             ;;
     esac
+}
+
+# --- SICHERHEITS-FUNKTIONEN (v3.4) ---
+
+# Maskiert sensible Daten für Logs (zeigt nur erste/letzte 4 Zeichen)
+mask_secret() {
+    local secret="$1"
+    local len=${#secret}
+
+    if [ $len -le 8 ]; then
+        echo "****"
+    else
+        echo "${secret:0:4}****${secret: -4}"
+    fi
+}
+
+# Validiert CIDR-Notation für Subnet Router
+validate_cidr() {
+    local cidr="$1"
+
+    # IPv4 CIDR Pattern: x.x.x.x/y
+    if [[ "$cidr" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+        # Prüfe ob IP-Teile zwischen 0-255 liegen
+        local ip="${cidr%/*}"
+        local prefix="${cidr#*/}"
+
+        IFS='.' read -ra octets <<< "$ip"
+        for octet in "${octets[@]}"; do
+            if [ "$octet" -gt 255 ]; then
+                return 1
+            fi
+        done
+
+        # Prüfe Prefix-Bereich
+        if [ "$prefix" -lt 0 ] || [ "$prefix" -gt 32 ]; then
+            return 1
+        fi
+
+        return 0
+    fi
+
+    return 1
+}
+
+# Validiert Tailscale Tags (Format: tag:xxx)
+validate_tags() {
+    local tags="$1"
+    local IFS=','
+
+    for tag in $tags; do
+        # Entferne Leerzeichen
+        tag=$(echo "$tag" | xargs)
+
+        # Tag muss mit "tag:" beginnen und nur erlaubte Zeichen enthalten
+        if [[ ! "$tag" =~ ^tag:[a-zA-Z0-9_-]+$ ]]; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+# Validiert Passkey (Mindestlänge 20 Zeichen)
+validate_passkey() {
+    local passkey="$1"
+    local min_length=20
+
+    if [ ${#passkey} -lt $min_length ]; then
+        return 1
+    fi
+
+    return 0
 }
 
 # Prüft ob ein Software-Paket bereits installiert ist
@@ -2247,6 +2326,10 @@ TSREPO
                 read -p "Bitte geben Sie Ihren Tailscale Auth-Key ein: " TS_AUTH_KEY
 
                 if [ -n "$TS_AUTH_KEY" ]; then
+                    # Auth-Key maskiert loggen
+                    debug "Auth-Key erhalten: $(mask_secret "$TS_AUTH_KEY")"
+                    log_action "TAILSCALE" "Auth-Key provided: $(mask_secret "$TS_AUTH_KEY")"
+
                     TS_HOSTNAME=$(hostname)
                     TS_CMD="tailscale up --auth-key=$TS_AUTH_KEY --ssh --advertise-exit-node --hostname=$TS_HOSTNAME"
 
@@ -2257,22 +2340,41 @@ TSREPO
                     echo "  ✅ Hostname: $TS_HOSTNAME"
                     echo ""
 
-                    # Optional: Subnet Router
+                    # Optional: Subnet Router mit Validierung
                     TS_ADVERTISE_ROUTES=""
                     if ask_yes_no "Soll dieser Server als Subnet Router fungieren?" "n"; then
-                        read -p "Geben Sie die CIDR ein (z.B. 192.168.1.0/24): " TS_ADVERTISE_ROUTES
-                        if [ -n "$TS_ADVERTISE_ROUTES" ]; then
-                            TS_CMD="$TS_CMD --advertise-routes=$TS_ADVERTISE_ROUTES"
-                        fi
+                        while true; do
+                            read -p "Geben Sie die CIDR ein (z.B. 192.168.1.0/24): " TS_ADVERTISE_ROUTES
+                            if [ -z "$TS_ADVERTISE_ROUTES" ]; then
+                                break
+                            elif validate_cidr "$TS_ADVERTISE_ROUTES"; then
+                                TS_CMD="$TS_CMD --advertise-routes=$TS_ADVERTISE_ROUTES"
+                                success "CIDR validiert: $TS_ADVERTISE_ROUTES"
+                                log_action "TAILSCALE" "Subnet routes: $TS_ADVERTISE_ROUTES"
+                                break
+                            else
+                                error "Ungültige CIDR-Notation. Beispiel: 192.168.1.0/24"
+                            fi
+                        done
                     fi
 
-                    # Optional: Tags
+                    # Optional: Tags mit Validierung
                     TS_TAGS=""
                     if ask_yes_no "Möchten Sie Tags für diesen Node setzen?" "n"; then
-                        read -p "Geben Sie Tags ein (z.B. tag:server,tag:prod): " TS_TAGS
-                        if [ -n "$TS_TAGS" ]; then
-                            TS_CMD="$TS_CMD --advertise-tags=$TS_TAGS"
-                        fi
+                        while true; do
+                            read -p "Geben Sie Tags ein (z.B. tag:server,tag:prod): " TS_TAGS
+                            if [ -z "$TS_TAGS" ]; then
+                                break
+                            elif validate_tags "$TS_TAGS"; then
+                                TS_CMD="$TS_CMD --advertise-tags=$TS_TAGS"
+                                success "Tags validiert: $TS_TAGS"
+                                log_action "TAILSCALE" "Tags: $TS_TAGS"
+                                break
+                            else
+                                error "Ungültiges Tag-Format. Tags müssen mit 'tag:' beginnen und nur Buchstaben, Zahlen, _ und - enthalten."
+                                echo "Beispiel: tag:server,tag:prod,tag:exit-node"
+                            fi
+                        done
                     fi
 
                     echo ""
@@ -2280,17 +2382,35 @@ TSREPO
                     if eval $TS_CMD; then
                         success "✅ Tailscale erfolgreich verbunden!"
                         TS_IPV4=$(tailscale ip -4 2>/dev/null)
+                        TS_IPV6=$(tailscale ip -6 2>/dev/null)
                         echo ""
-                        echo -e "${C_BLUE}Tailscale IPv4: $TS_IPV4${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo -e "${C_GREEN}  Tailscale Status${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo ""
+                        echo -e "${C_BLUE}IP-Adressen:${C_RESET}"
+                        echo "  IPv4: $TS_IPV4"
+                        echo "  IPv6: $TS_IPV6"
+                        echo ""
+                        echo -e "${C_BLUE}Konfiguration:${C_RESET}"
+                        echo "  Hostname: $TS_HOSTNAME"
+                        echo "  SSH: Aktiviert"
+                        echo "  Exit Node: Advertised"
+                        [ -n "$TS_ADVERTISE_ROUTES" ] && echo "  Subnet Routes: $TS_ADVERTISE_ROUTES"
+                        [ -n "$TS_TAGS" ] && echo "  Tags: $TS_TAGS"
+                        echo ""
+                        echo -e "${C_YELLOW}Hinweis: Exit Node und Subnet Routes müssen in der Admin-Console approved werden.${C_RESET}"
+                        echo ""
 
                         # UFW für Tailscale
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
                             ufw allow in on tailscale0 2>/dev/null || true
                         fi
 
-                        log_action "TAILSCALE" "Connected to tailnet"
+                        log_action "TAILSCALE" "Successfully connected to tailnet"
                     else
                         error "Tailscale-Verbindung fehlgeschlagen"
+                        log_action "TAILSCALE" "Connection failed"
                     fi
                 fi
             else
@@ -2608,20 +2728,30 @@ EOF
                             fi
                         fi
 
-                        # Passkey abfragen
+                        # Passkey abfragen mit Validierung
                         echo ""
                         echo -e "${C_YELLOW}Der Passkey sichert die Kommunikation zwischen Komodo Core und Periphery.${C_RESET}"
-                        echo -e "${C_BLUE}Erstellen Sie einen Passkey in Ihrer Komodo Core Instanz.${C_RESET}"
+                        echo -e "${C_BLUE}Erstellen Sie einen Passkey in Ihrer Komodo Core Instanz (min. 20 Zeichen).${C_RESET}"
                         echo ""
-                        read -p "Bitte geben Sie den Komodo Passkey ein: " KOMODO_PASSKEY
 
-                        if [ -z "$KOMODO_PASSKEY" ]; then
-                            error "Passkey ist erforderlich. Installation abgebrochen."
-                            log_action "KOMODO" "No passkey provided"
+                        while true; do
+                            read -p "Bitte geben Sie den Komodo Passkey ein: " KOMODO_PASSKEY
+
+                            if [ -z "$KOMODO_PASSKEY" ]; then
+                                error "Passkey ist erforderlich."
+                                continue
+                            fi
+
+                            if ! validate_passkey "$KOMODO_PASSKEY"; then
+                                error "Passkey muss mindestens 20 Zeichen haben (aktuell: ${#KOMODO_PASSKEY})."
+                                continue
+                            fi
+
+                            # Passkey validiert und maskiert loggen
+                            debug "Passkey erhalten: $(mask_secret "$KOMODO_PASSKEY")"
+                            log_action "KOMODO" "Passkey provided: $(mask_secret "$KOMODO_PASSKEY")"
                             break
-                        fi
-
-                        debug "Passkey erhalten (Länge: ${#KOMODO_PASSKEY})"
+                        done
 
                         # Verzeichnis erstellen
                         KOMODO_DIR="/opt/komodo"
@@ -2683,7 +2813,8 @@ EOF
                         echo ""
                         echo -e "${C_BLUE}Verbindungsdetails:${C_RESET}"
                         echo "  Bind IP: $KOMODO_BIND_IP:8120"
-                        echo "  Passkey: $KOMODO_PASSKEY"
+                        echo "  Passkey: $(mask_secret "$KOMODO_PASSKEY")"
+                        echo "  Konfiguration: $KOMODO_DIR/compose.yml"
                         echo ""
 
                         if [ "$KOMODO_BIND_IP" != "0.0.0.0" ]; then
@@ -2699,7 +2830,7 @@ EOF
                         echo "  1. Gehen Sie zu Ihrer Komodo Core Instanz"
                         echo "  2. Fügen Sie diesen Server hinzu mit:"
                         echo "     - Address: $KOMODO_BIND_IP:8120"
-                        echo "     - Passkey: $KOMODO_PASSKEY"
+                        echo "     - Passkey: (siehe $KOMODO_DIR/compose.yml)"
                         echo ""
 
                         # Firewall-Regeln für Komodo
