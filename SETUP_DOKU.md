@@ -4,9 +4,9 @@
 
 | Eigenschaft | Wert |
 |-------------|------|
-| **Version** | 3.2.0 |
+| **Version** | 3.3.0 |
 | **Dateiname** | `setupv3.sh` |
-| **Zweck** | Universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servers |
+| **Zweck** | Universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servern |
 | **Log-Datei** | `./install.log` |
 
 ## Unterstützte Betriebssysteme
@@ -464,6 +464,7 @@ ssh -i /pfad/zum/privaten/schlüssel -p <PORT> <USER>@<SERVER_IP>
 
 | Version | Änderungen |
 |---------|------------|
+| 3.3.0 | Docker, Node.js/npm, Tailscale werden automatisch installiert |
 | 3.2.0 | Docker Auto-Install, Komodo Periphery Agent, Tailscale IP Binding |
 | 3.1.0 | Tailscale Integration: VPN mit SSH, Exit Node, Subnet Router, Tags |
 | 3.0.0 | Docker JSON-Fix: `default-address-pools-v6` entfernt, IPv4/IPv6 in einem Array |
