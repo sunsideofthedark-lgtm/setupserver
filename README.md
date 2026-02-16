@@ -2,6 +2,25 @@
 
 Ein universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servern.
 
+## One-Liner (Kopieren & Ausführen)
+
+**Ubuntu / Debian:**
+```bash
+apt update && apt install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver && sudo bash ./setupv3.sh
+```
+
+**CentOS / RHEL / Rocky / Alma:**
+```bash
+yum install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver && sudo bash ./setupv3.sh
+```
+
+**Fedora:**
+```bash
+dnf install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver && sudo bash ./setupv3.sh
+```
+
+---
+
 ## Schnellstart
 
 ```bash
