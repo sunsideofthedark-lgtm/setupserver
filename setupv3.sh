@@ -1,11 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.4.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.5.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
+#
+# Hinzugefügte Features v3.5 (GitHub Integration):
+# - NEU: GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung
+# - NEU: Automatische gh Installation falls nicht vorhanden
+# - NEU: Fallback auf manuelle Methode ohne gh
+# - NEU: Git-Konfiguration mit GitHub Benutzerdaten
 #
 # Hinzugefügte Features v3.4 (Sicherheit & Validierung):
 # - NEU: mask_secret() - Sensible Daten werden im Log maskiert
@@ -2558,6 +2564,18 @@ TSREPO
                 options+=("Komodo Periphery installieren")
                 echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
             fi
+            # GitHub SSH-Key
+            options+=("GitHub SSH-Key einrichten")
+            echo -e " 18. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
+            echo ""
+
+            options+=("Fertig")
+                options+=("Komodo Periphery (✓ installiert)")
+                echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_INSTALLED"
+            else
+                options+=("Komodo Periphery installieren")
+                echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
+            fi
             echo ""
 
             options+=("Fertig")
@@ -2841,6 +2859,244 @@ EOF
                         fi
 
                         log_action "KOMODO" "Installation completed"
+                        break
+                        ;;
+                    "GitHub SSH-Key einrichten")
+                        info "Richte GitHub SSH-Key ein..."
+                        debug "Starte GitHub SSH-Key Setup"
+                        log_action "GITHUB_SSH" "Starting GitHub SSH key setup"
+
+                        # Git installieren falls nicht vorhanden
+                        if ! command -v git >/dev/null 2>&1; then
+                            info "Installiere git..."
+                            install_package "git"
+                        fi
+
+                        # Ziel-User bestimmen
+                        GITHUB_USER="${NEW_USER:-root}"
+                        if [ "$GITHUB_USER" = "root" ]; then
+                            SSH_DIR="/root/.ssh"
+                            HOME_DIR="/root"
+                        else
+                            SSH_DIR="/home/$GITHUB_USER/.ssh"
+                            HOME_DIR="/home/$GITHUB_USER"
+                        fi
+
+                        echo ""
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo -e "${C_CYAN}  GitHub SSH-Key Setup${C_RESET}"
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo ""
+
+                        # Prüfen ob GitHub CLI installiert ist
+                        if command -v gh >/dev/null 2>&1; then
+                            echo -e "${C_GREEN}GitHub CLI (gh) ist installiert!${C_RESET}"
+                            echo ""
+
+                            if ask_yes_no "Möchtest du die GitHub CLI für das Setup verwenden? (Empfohlen - automatischer Key-Upload)" "y"; then
+                                echo ""
+                                echo -e "${C_YELLOW}=== GitHub CLI Login ===${C_RESET}"
+                                echo ""
+                                echo "Wähle im folgenden Dialog:"
+                                echo "  1. Account: GitHub.com"
+                                echo "  2. Protocol: SSH"
+                                echo "  3. Generate new SSH key: Yes"
+                                echo "  4. Authenticate: Login with a web browser"
+                                echo ""
+
+                                # gh auth login ausführen
+                                if sudo -u "$GITHUB_USER" gh auth login; then
+                                    success "✅ GitHub CLI Authentifizierung erfolgreich!"
+                                    log_action "GITHUB_SSH" "GitHub CLI auth successful"
+
+                                    # Verbindung testen
+                                    echo ""
+                                    info "Teste GitHub Verbindung..."
+                                    if sudo -u "$GITHUB_USER" ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+                                        success "✅ SSH-Verbindung zu GitHub funktioniert!"
+                                    fi
+
+                                    # Git konfigurieren mit GitHub Daten
+                                    GH_USER=$(sudo -u "$GITHUB_USER" gh api user --jq '.login' 2>/dev/null)
+                                    GH_EMAIL=$(sudo -u "$GITHUB_USER" gh api user --jq '.email' 2>/dev/null)
+
+                                    if [ -n "$GH_USER" ]; then
+                                        sudo -u "$GITHUB_USER" git config --global user.name "$GH_USER"
+                                        [ -n "$GH_EMAIL" ] && [ "$GH_EMAIL" != "null" ] && sudo -u "$GITHUB_USER" git config --global user.email "$GH_EMAIL"
+                                        success "Git konfiguriert mit GitHub Daten"
+                                    fi
+
+                                    echo ""
+                                    echo -e "${C_GREEN}===========================================${C_RESET}"
+                                    echo -e "${C_GREEN}  Setup abgeschlossen!${C_RESET}"
+                                    echo -e "${C_GREEN}===========================================${C_RESET}"
+                                    echo ""
+                                    echo -e "${C_BLUE}Du kannst jetzt Repositorys klonen:${C_RESET}"
+                                    echo "  git clone git@github.com:username/repo.git"
+                                    echo ""
+
+                                    log_action "GITHUB_SSH" "Setup completed via gh CLI"
+                                    break
+                                else
+                                    warning "GitHub CLI Login fehlgeschlagen. Falle auf manuelle Methode zurück."
+                                fi
+                            fi
+                        else
+                            echo -e "${C_YELLOW}GitHub CLI (gh) ist nicht installiert.${C_RESET}"
+                            echo ""
+
+                            if ask_yes_no "Möchtest du die GitHub CLI installieren? (Empfohlen für einfachere Einrichtung)" "y"; then
+                                info "Installiere GitHub CLI..."
+
+                                case "$OS_ID" in
+                                    ubuntu|debian)
+                                        # GitHub CLI Repo hinzufügen
+                                        install_package "curl"
+                                        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+                                        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+                                        $PKG_UPDATE
+                                        install_package "gh"
+                                        ;;
+                                    centos|rhel|rocky|almalinux|fedora)
+                                        install_package "gh"
+                                        ;;
+                                    opensuse*|sles)
+                                        zypper addrepo https://cli.github.com/packages/rpm/gh-cli.repo
+                                        install_package "gh"
+                                        ;;
+                                    arch)
+                                        install_package "gh"
+                                        ;;
+                                    *)
+                                        warning "Automatische Installation für $OS_ID nicht verfügbar."
+                                        echo "Installiere gh manuell: https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
+                                        ;;
+                                esac
+
+                                if command -v gh >/dev/null 2>&1; then
+                                    success "GitHub CLI installiert! Starte Login..."
+                                    echo ""
+
+                                    echo -e "${C_YELLOW}Wähle im folgenden Dialog:${C_RESET}"
+                                    echo "  1. Account: GitHub.com"
+                                    echo "  2. Protocol: SSH"
+                                    echo "  3. Generate new SSH key: Yes"
+                                    echo "  4. Authenticate: Login with a web browser"
+                                    echo ""
+
+                                    if sudo -u "$GITHUB_USER" gh auth login; then
+                                        success "✅ GitHub CLI Authentifizierung erfolgreich!"
+                                        log_action "GITHUB_SSH" "GitHub CLI installed and auth successful"
+
+                                        # Verbindung testen
+                                        if sudo -u "$GITHUB_USER" ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+                                            success "✅ SSH-Verbindung zu GitHub funktioniert!"
+                                        fi
+
+                                        echo ""
+                                        echo -e "${C_GREEN}Setup abgeschlossen!${C_RESET}"
+                                        log_action "GITHUB_SSH" "Setup completed"
+                                        break
+                                    fi
+                                fi
+                            fi
+                        fi
+
+                        # Fallback: Manuelle Methode
+                        echo ""
+                        echo -e "${C_YELLOW}=== Manuelle SSH-Key Einrichtung ===${C_RESET}"
+                        echo ""
+
+                        # Prüfen ob bereits ein Key existiert
+                        GENERATE_KEY=false
+                        if [ -f "$SSH_DIR/id_ed25519" ]; then
+                            echo -e "${C_YELLOW}Es existiert bereits ein SSH-Key:${C_RESET}"
+                            echo "  Pfad: $SSH_DIR/id_ed25519"
+                            echo ""
+
+                            if ask_yes_no "Möchtest du einen neuen Key generieren? (Der alte wird überschrieben)" "n"; then
+                                backup_time=$(date +%Y%m%d_%H%M%S)
+                                mv "$SSH_DIR/id_ed25519" "$SSH_DIR/id_ed25519.backup_$backup_time" 2>/dev/null
+                                mv "$SSH_DIR/id_ed25519.pub" "$SSH_DIR/id_ed25519.pub.backup_$backup_time" 2>/dev/null
+                                info "Alte Keys gesichert"
+                                GENERATE_KEY=true
+                            fi
+                        else
+                            GENERATE_KEY=true
+                        fi
+
+                        # Neuen Key generieren
+                        if [ "$GENERATE_KEY" = true ]; then
+                            echo ""
+                            info "Generiere neuen ed25519 SSH-Key..."
+
+                            mkdir -p "$SSH_DIR"
+                            chmod 700 "$SSH_DIR"
+
+                            read -p "E-Mail für SSH-Key (optional): " SSH_EMAIL
+                            SSH_COMMENT="${SSH_EMAIL:-server-$(hostname)-$(date +%Y%m%d)}"
+
+                            ssh-keygen -t ed25519 -C "$SSH_COMMENT" -f "$SSH_DIR/id_ed25519" -N ""
+
+                            chmod 600 "$SSH_DIR/id_ed25519"
+                            chmod 644 "$SSH_DIR/id_ed25519.pub"
+
+                            [ "$GITHUB_USER" != "root" ] && chown -R "$GITHUB_USER:$GITHUB_USER" "$SSH_DIR"
+
+                            success "✅ SSH-Key generiert"
+                            log_action "GITHUB_SSH" "SSH key generated manually"
+                        fi
+
+                        # Public Key anzeigen
+                        echo ""
+                        echo -e "${C_GREEN}=== Dein öffentlicher SSH-Key ===${C_RESET}"
+                        echo ""
+                        cat "$SSH_DIR/id_ed25519.pub"
+                        echo ""
+                        echo -e "${C_YELLOW}Füge diesen Key bei GitHub hinzu:${C_RESET}"
+                        echo -e "  ${C_BLUE}https://github.com/settings/keys${C_RESET}"
+                        echo -e "  ${C_GREEN}\"New SSH key\" → Key einfügen → Save${C_RESET}"
+                        echo ""
+
+                        if ask_yes_no "Key hinzugefügt? Verbindung testen?" "y"; then
+                            # SSH-Config für GitHub
+                            if [ ! -f "$SSH_DIR/config" ] || ! grep -q "github.com" "$SSH_DIR/config" 2>/dev/null; then
+                                cat >> "$SSH_DIR/config" << 'EOF'
+
+# GitHub
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+EOF
+                                chmod 600 "$SSH_DIR/config"
+                                [ "$GITHUB_USER" != "root" ] && chown "$GITHUB_USER:$GITHUB_USER" "$SSH_DIR/config"
+                            fi
+
+                            echo ""
+                            if sudo -u "$GITHUB_USER" ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+                                success "✅ GitHub Verbindung erfolgreich!"
+                                log_action "GITHUB_SSH" "Manual setup successful"
+                            else
+                                error "Verbindung fehlgeschlagen. Prüfe ob der Key korrekt hinzugefügt wurde."
+                            fi
+                        fi
+
+                        # Git konfigurieren
+                        echo ""
+                        if ask_yes_no "Git konfigurieren? (Name & E-Mail)" "y"; then
+                            read -p "Git Username: " GIT_USERNAME
+                            read -p "Git E-Mail: " GIT_EMAIL
+
+                            [ -n "$GIT_USERNAME" ] && sudo -u "$GITHUB_USER" git config --global user.name "$GIT_USERNAME"
+                            [ -n "$GIT_EMAIL" ] && sudo -u "$GITHUB_USER" git config --global user.email "$GIT_EMAIL"
+                            success "Git konfiguriert"
+                        fi
+
+                        echo ""
+                        echo -e "${C_GREEN}Setup abgeschlossen!${C_RESET}"
+                        log_action "GITHUB_SSH" "Manual setup completed"
                         break
                         ;;
                     "Fertig")

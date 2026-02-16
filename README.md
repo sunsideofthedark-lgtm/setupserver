@@ -144,6 +144,24 @@ Wenn Komodo installiert wird:
 2. Tailscale IP wird automatisch erkannt
 3. Konfiguration liegt in `/opt/komodo/compose.yml`
 
+### 7. GitHub SSH-Key (empfohlen)
+
+**Mit GitHub CLI (empfohlen - automatisch):**
+
+1. Wähle "GitHub SSH-Key einrichten" im Menü
+2. Das Skript installiert `gh` falls nicht vorhanden
+3. Wähle im Dialog:
+   - Account: `GitHub.com`
+   - Protocol: `SSH`
+   - Generate new SSH key: `Yes`
+   - Authenticate: `Login with a web browser`
+4. Code im Browser eingeben
+
+**Danach kannst du Repositorys klonen ohne Passwort:**
+```bash
+git clone git@github.com:username/repo.git
+```
+
 ---
 
 ## Nach dem Setup
@@ -289,6 +307,7 @@ tailscale up --force-reauth
 
 | Version | Änderungen |
 |---------|------------|
+| 3.5.0 | GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung |
 | 3.4.0 | Sicherheit: Secret-Masking, Validierung für CIDR/Tags/Passkey |
 | 3.3.0 | Docker, Node.js/npm, Tailscale werden automatisch installiert |
 | 3.2.0 | Docker Auto-Install, Komodo Periphery Agent |
