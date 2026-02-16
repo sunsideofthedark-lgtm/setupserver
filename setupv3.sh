@@ -2572,9 +2572,24 @@ TSREPO
                 options+=("Komodo Periphery installieren")
                 echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
             fi
-            # GitHub SSH-Key
-            options+=("GitHub SSH-Key einrichten")
-            echo -e " 18. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
+            # GitHub SSH-Key - Prüfen ob bereits konfiguriert
+            GITHUB_SSH_CONFIGURED=false
+            if command -v gh >/dev/null 2>&1 && gh auth status &>/dev/null; then
+                GITHUB_SSH_CONFIGURED=true
+            elif [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
+                # Prüfen ob Key bei GitHub registriert ist (via ssh -T)
+                if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+                    GITHUB_SSH_CONFIGURED=true
+                fi
+            fi
+
+            if [ "$GITHUB_SSH_CONFIGURED" = true ]; then
+                options+=("GitHub SSH-Key (✓ konfiguriert)")
+                echo -e " 18. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfiguriert $STATUS_INSTALLED"
+            else
+                options+=("GitHub SSH-Key einrichten")
+                echo -e " 18. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
+            fi
             echo ""
 
             options+=("Fertig")
@@ -2860,7 +2875,7 @@ EOF
                         log_action "KOMODO" "Installation completed"
                         break
                         ;;
-                    "GitHub SSH-Key einrichten")
+                    "GitHub SSH-Key einrichten"|"GitHub SSH-Key (✓ konfiguriert)")
                         info "Richte GitHub SSH-Key ein..."
                         debug "Starte GitHub SSH-Key Setup"
                         log_action "GITHUB_SSH" "Starting GitHub SSH key setup"
