@@ -2570,15 +2570,6 @@ TSREPO
             echo ""
 
             options+=("Fertig")
-                options+=("Komodo Periphery (✓ installiert)")
-                echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_INSTALLED"
-            else
-                options+=("Komodo Periphery installieren")
-                echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
-            fi
-            echo ""
-
-            options+=("Fertig")
 
             PS3="Ihre Wahl (oder 'Fertig' zum Beenden): "
             select opt in "${options[@]}"; do
