@@ -2881,10 +2881,29 @@ EOF
                             HOME_DIR="/home/$GITHUB_USER"
                         fi
 
+                        # Hostname für SSH-Key und Git Username
+                        GH_HOSTNAME=$(hostname)
+
                         echo ""
                         echo -e "${C_CYAN}===========================================${C_RESET}"
                         echo -e "${C_CYAN}  GitHub SSH-Key Setup${C_RESET}"
                         echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo ""
+
+                        # Domain abfragen für SSH-Key Kommentar
+                        echo -e "${C_YELLOW}Domain für SSH-Key Kommentar eingeben:${C_RESET}"
+                        echo -e "  (Der SSH-Key wird als ${C_GREEN}${GH_HOSTNAME}@<domain>${C_RESET} angezeigt)"
+                        echo ""
+                        read -p "Domain (z.B. sunriseing.dev): " GH_DOMAIN
+
+                        if [ -n "$GH_DOMAIN" ]; then
+                            SSH_KEY_COMMENT="${GH_HOSTNAME}@${GH_DOMAIN}"
+                        else
+                            SSH_KEY_COMMENT="${GH_HOSTNAME}-server"
+                        fi
+
+                        info "SSH-Key Kommentar: $SSH_KEY_COMMENT"
+                        info "Git Username: $GH_HOSTNAME"
                         echo ""
 
                         # Prüfen ob GitHub CLI installiert ist
@@ -2915,22 +2934,20 @@ EOF
                                         success "✅ SSH-Verbindung zu GitHub funktioniert!"
                                     fi
 
-                                    # Git konfigurieren mit GitHub Daten
-                                    GH_USER=$(sudo -u "$GITHUB_USER" gh api user --jq '.login' 2>/dev/null)
-                                    GH_EMAIL=$(sudo -u "$GITHUB_USER" gh api user --jq '.email' 2>/dev/null)
-
-                                    if [ -n "$GH_USER" ]; then
-                                        sudo -u "$GITHUB_USER" git config --global user.name "$GH_USER"
-                                        [ -n "$GH_EMAIL" ] && [ "$GH_EMAIL" != "null" ] && sudo -u "$GITHUB_USER" git config --global user.email "$GH_EMAIL"
-                                        success "Git konfiguriert mit GitHub Daten"
-                                    fi
+                                    # Git mit Hostname konfigurieren
+                                    sudo -u "$GITHUB_USER" git config --global user.name "$GH_HOSTNAME"
+                                    sudo -u "$GITHUB_USER" git config --global user.email "${GH_HOSTNAME}@${GH_DOMAIN}"
+                                    success "Git konfiguriert:"
+                                    echo "  Username: $GH_HOSTNAME"
+                                    echo "  E-Mail: ${GH_HOSTNAME}@${GH_DOMAIN}"
 
                                     echo ""
                                     echo -e "${C_GREEN}===========================================${C_RESET}"
                                     echo -e "${C_GREEN}  Setup abgeschlossen!${C_RESET}"
                                     echo -e "${C_GREEN}===========================================${C_RESET}"
                                     echo ""
-                                    echo -e "${C_BLUE}Du kannst jetzt Repositorys klonen:${C_RESET}"
+                                    echo -e "${C_BLUE}SSH-Key:${C_RESET} $SSH_KEY_COMMENT"
+                                    echo -e "${C_BLUE}Repository klonen:${C_RESET}"
                                     echo "  git clone git@github.com:username/repo.git"
                                     echo ""
 
@@ -3027,23 +3044,20 @@ EOF
                         # Neuen Key generieren
                         if [ "$GENERATE_KEY" = true ]; then
                             echo ""
-                            info "Generiere neuen ed25519 SSH-Key..."
+                            info "Generiere neuen ed25519 SSH-Key mit Kommentar: $SSH_KEY_COMMENT"
 
                             mkdir -p "$SSH_DIR"
                             chmod 700 "$SSH_DIR"
 
-                            read -p "E-Mail für SSH-Key (optional): " SSH_EMAIL
-                            SSH_COMMENT="${SSH_EMAIL:-server-$(hostname)-$(date +%Y%m%d)}"
-
-                            ssh-keygen -t ed25519 -C "$SSH_COMMENT" -f "$SSH_DIR/id_ed25519" -N ""
+                            ssh-keygen -t ed25519 -C "$SSH_KEY_COMMENT" -f "$SSH_DIR/id_ed25519" -N ""
 
                             chmod 600 "$SSH_DIR/id_ed25519"
                             chmod 644 "$SSH_DIR/id_ed25519.pub"
 
                             [ "$GITHUB_USER" != "root" ] && chown -R "$GITHUB_USER:$GITHUB_USER" "$SSH_DIR"
 
-                            success "✅ SSH-Key generiert"
-                            log_action "GITHUB_SSH" "SSH key generated manually"
+                            success "✅ SSH-Key generiert: $SSH_KEY_COMMENT"
+                            log_action "GITHUB_SSH" "SSH key generated manually: $SSH_KEY_COMMENT"
                         fi
 
                         # Public Key anzeigen
@@ -3082,19 +3096,22 @@ EOF
                             fi
                         fi
 
-                        # Git konfigurieren
+                        # Git automatisch mit Hostname konfigurieren
                         echo ""
-                        if ask_yes_no "Git konfigurieren? (Name & E-Mail)" "y"; then
-                            read -p "Git Username: " GIT_USERNAME
-                            read -p "Git E-Mail: " GIT_EMAIL
-
-                            [ -n "$GIT_USERNAME" ] && sudo -u "$GITHUB_USER" git config --global user.name "$GIT_USERNAME"
-                            [ -n "$GIT_EMAIL" ] && sudo -u "$GITHUB_USER" git config --global user.email "$GIT_EMAIL"
-                            success "Git konfiguriert"
-                        fi
+                        sudo -u "$GITHUB_USER" git config --global user.name "$GH_HOSTNAME"
+                        sudo -u "$GITHUB_USER" git config --global user.email "${GH_HOSTNAME}@${GH_DOMAIN}"
+                        success "Git konfiguriert:"
+                        echo "  Username: $GH_HOSTNAME"
+                        echo "  E-Mail: ${GH_HOSTNAME}@${GH_DOMAIN}"
 
                         echo ""
-                        echo -e "${C_GREEN}Setup abgeschlossen!${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo -e "${C_GREEN}  Setup abgeschlossen!${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo ""
+                        echo -e "${C_BLUE}SSH-Key:${C_RESET} $SSH_KEY_COMMENT"
+                        echo -e "${C_BLUE}Git Commits werden als:${C_RESET} $GH_HOSTNAME <${GH_HOSTNAME}@${GH_DOMAIN}>"
+                        echo ""
                         log_action "GITHUB_SSH" "Manual setup completed"
                         break
                         ;;
