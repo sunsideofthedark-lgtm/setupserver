@@ -2065,6 +2065,14 @@ if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
     info "Prüfe Docker-Installation..."
     if command -v docker >/dev/null 2>&1; then
         success "Docker ist bereits installiert: $(docker --version)"
+
+        # Prüfe ob IPv6 in daemon.json aktiviert ist
+        if [ -f "/etc/docker/daemon.json" ] && grep -q '"ipv6": true' /etc/docker/daemon.json 2>/dev/null; then
+            DOCKER_IPV6_ENABLED=true
+            debug "IPv6 in Docker daemon.json ist aktiviert"
+        else
+            debug "IPv6 in Docker nicht aktiviert"
+        fi
     else
         info "Installiere Docker und Docker Compose automatisch..."
         debug "Starte Docker-Installation"
