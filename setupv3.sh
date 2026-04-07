@@ -2171,16 +2171,20 @@ EOF
             sudo systemctl restart docker
             DOCKER_IPV6_ENABLED=true
 
-            # newt_talk Netzwerk erstellen
-            info "Erstelle Docker-Netzwerk 'newt_talk'..."
-            docker network rm newt_talk 2>/dev/null || true
-            if docker network create \
-                    --opt com.docker.network.driver.mtu=$MTU_VALUE \
-                    --ipv6 \
-                    --subnet="172.25.0.0/24" \
-                    --subnet="fd00:db8:10:0::/64" \
-                    newt_talk; then
-                success "Docker-Netzwerk 'newt_talk' erstellt."
+            # newt_talk Netzwerk erstellen (optional)
+            if ask_yes_no "Möchten Sie das Docker-Netzwerk 'newt_talk' erstellen? (Empfohlen für Container-Isolation mit IPv6)" "y"; then
+                info "Erstelle Docker-Netzwerk 'newt_talk'..."
+                docker network rm newt_talk 2>/dev/null || true
+                if docker network create \
+                        --opt com.docker.network.driver.mtu=$MTU_VALUE \
+                        --ipv6 \
+                        --subnet="172.25.0.0/24" \
+                        --subnet="fd00:db8:10:0::/64" \
+                        newt_talk; then
+                    success "Docker-Netzwerk 'newt_talk' erstellt."
+                fi
+            else
+                info "Docker-Netzwerk 'newt_talk' wird übersprungen."
             fi
 
             # Benutzer zur docker-Gruppe hinzufügen
@@ -2193,6 +2197,37 @@ EOF
             error "Docker-Installation fehlgeschlagen"
             log_action "DOCKER" "Docker installation failed"
         fi
+    fi
+
+    # === ZFS CACHE KONFIGURATION ===
+    echo ""
+    info "Prüfe ZFS-Dateisystem..."
+    if command -v zpool >/dev/null 2>&1 && zpool list >/dev/null 2>&1; then
+        success "ZFS-Dateisystem erkannt."
+        if ask_yes_no "Möchten Sie einen ZFS ARC-Cache konfigurieren?" "n"; then
+            # Aktuelle Cache-Größe anzeigen
+            local current_arc_max=$(cat /sys/module/zfs/parameters/zfs_arc_max 2>/dev/null || echo "nicht gesetzt")
+            info "Aktueller zfs_arc_max: $current_arc_max Bytes"
+
+            read -p "Gewünschte Cache-Größe in GB [z.B. 8]: " zfs_cache_gb
+            if [[ "$zfs_cache_gb" =~ ^[0-9]+$ ]] && [ "$zfs_cache_gb" -gt 0 ]; then
+                local cache_bytes=$((zfs_cache_gb * 1024 * 1024 * 1024))
+
+                # Temporär setzen
+                echo "$cache_bytes" | sudo tee /sys/module/zfs/parameters/zfs_arc_max >/dev/null
+                success "ZFS ARC-Cache temporär auf ${zfs_cache_gb}GB gesetzt."
+
+                # Permanent in /etc/modprobe.d/zfs.conf
+                sudo mkdir -p /etc/modprobe.d
+                echo "options zfs zfs_arc_max=$cache_bytes" | sudo tee /etc/modprobe.d/zfs.conf >/dev/null
+                success "ZFS ARC-Cache permanent in /etc/modprobe.d/zfs.conf konfiguriert."
+                log_action "ZFS" "ARC cache configured to ${zfs_cache_gb}GB"
+            else
+                error "Ungültige Eingabe. Cache-Größe muss eine positive Zahl sein."
+            fi
+        fi
+    else
+        info "Kein ZFS-Dateisystem erkannt - überspringe ZFS-Cache-Konfiguration."
     fi
 
     # === Node.js/npm AUTOMATISCH INSTALLIEREN (v3.3) ===
