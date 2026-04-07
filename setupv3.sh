@@ -2845,7 +2845,7 @@ EOF
                         # Root Directory wählen
                         echo ""
                         echo -e "${C_YELLOW}Das Root Directory enthält alle Komodo-Dateien (Compose, Repos, etc.).${C_RESET}"
-                        KOMODO_ROOT_DIR="${KOMODO_ROOT_DIR:-/etc/komodo}"
+                        KOMODO_ROOT_DIR="${KOMODO_ROOT_DIR:-/opt/komodo}"
                         read -p "Root Directory [$KOMODO_ROOT_DIR]: " KOMODO_ROOT_INPUT
                         KOMODO_ROOT_DIR="${KOMODO_ROOT_INPUT:-$KOMODO_ROOT_DIR}"
 
