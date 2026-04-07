@@ -2772,9 +2772,9 @@ EOF
                         break
                         ;;
                     "Komodo Periphery installieren"|"Komodo Periphery (✓ installiert)")
-                        info "Installiere Komodo Periphery Agent..."
-                        debug "Starte Komodo Periphery Installation"
-                        log_action "KOMODO" "Starting Komodo Periphery installation"
+                        info "Installiere Komodo Periphery Agent (v2)..."
+                        debug "Starte Komodo Periphery v2 Installation"
+                        log_action "KOMODO" "Starting Komodo Periphery v2 installation"
 
                         # Prüfen ob Docker installiert ist
                         if ! command -v docker >/dev/null 2>&1; then
@@ -2792,91 +2792,98 @@ EOF
 
                         echo ""
                         echo -e "${C_CYAN}===========================================${C_RESET}"
-                        echo -e "${C_CYAN}  Komodo Periphery Agent Konfiguration${C_RESET}"
+                        echo -e "${C_CYAN}  Komodo Periphery Agent v2 Konfiguration${C_RESET}"
                         echo -e "${C_CYAN}===========================================${C_RESET}"
                         echo ""
 
-                        # Bind IP ermitteln (Tailscale oder alle Interfaces)
-                        KOMODO_BIND_IP="0.0.0.0"
-                        if command -v tailscale >/dev/null 2>&1; then
-                            TS_IP=$(tailscale ip -4 2>/dev/null)
-                            if [ -n "$TS_IP" ]; then
-                                echo -e "${C_GREEN}Tailscale erkannt! IPv4: $TS_IP${C_RESET}"
-                                echo ""
-                                if ask_yes_no "Soll Komodo nur über Tailscale erreichbar sein? (Empfohlen für Sicherheit)" "y"; then
-                                    KOMODO_BIND_IP="$TS_IP"
-                                    info "Komodo wird an Tailscale IP gebunden: $KOMODO_BIND_IP"
-                                else
-                                    info "Komodo wird an allen Interfaces erreichbar sein (0.0.0.0)"
-                                fi
-                            fi
+                        # Komodo Core Address abfragen
+                        echo -e "${C_YELLOW}Die Komodo Core Adresse ist die URL Ihrer Komodo Core Instanz.${C_RESET}"
+                        echo -e "${C_BLUE}Beispiel: komodo.example.com oder 192.168.1.100:9120${C_RESET}"
+                        echo ""
+                        read -p "Komodo Core Adresse: " KOMODO_CORE_ADDRESS
+
+                        if [ -z "$KOMODO_CORE_ADDRESS" ]; then
+                            error "Core Adresse ist erforderlich."
+                            break
                         fi
 
-                        # Passkey abfragen mit Validierung
+                        # Server Name abfragen
                         echo ""
-                        echo -e "${C_YELLOW}Der Passkey sichert die Kommunikation zwischen Komodo Core und Periphery.${C_RESET}"
-                        echo -e "${C_BLUE}Erstellen Sie einen Passkey in Ihrer Komodo Core Instanz (min. 20 Zeichen).${C_RESET}"
+                        echo -e "${C_YELLOW}Der Server-Name identifiziert diesen Server in Komodo.${C_RESET}"
+                        read -p "Server-Name (connect_as): " KOMODO_SERVER_NAME
+
+                        if [ -z "$KOMODO_SERVER_NAME" ]; then
+                            # Hostname als Fallback
+                            KOMODO_SERVER_NAME=$(hostname)
+                            info "Verwende Hostname als Server-Name: $KOMODO_SERVER_NAME"
+                        fi
+
+                        # Onboarding Key (optional)
                         echo ""
+                        echo -e "${C_YELLOW}Onboarding Key ist optional. Erstellen Sie ihn in der Komodo Core UI.${C_RESET}"
+                        echo -e "${C_BLUE}Ermöglicht automatische Server-Erstellung in Komodo.${C_RESET}"
+                        read -p "Onboarding Key (optional, Enter zum Überspringen): " KOMODO_ONBOARDING_KEY
 
-                        while true; do
-                            read -p "Bitte geben Sie den Komodo Passkey ein: " KOMODO_PASSKEY
-
-                            if [ -z "$KOMODO_PASSKEY" ]; then
-                                error "Passkey ist erforderlich."
-                                continue
-                            fi
-
-                            if ! validate_passkey "$KOMODO_PASSKEY"; then
-                                error "Passkey muss mindestens 20 Zeichen haben (aktuell: ${#KOMODO_PASSKEY})."
-                                continue
-                            fi
-
-                            # Passkey validiert und maskiert loggen
-                            debug "Passkey erhalten: $(mask_secret "$KOMODO_PASSKEY")"
-                            log_action "KOMODO" "Passkey provided: $(mask_secret "$KOMODO_PASSKEY")"
-                            break
-                        done
+                        # Root Directory wählen
+                        echo ""
+                        echo -e "${C_YELLOW}Das Root Directory enthält alle Komodo-Dateien (Compose, Repos, etc.).${C_RESET}"
+                        KOMODO_ROOT_DIR="${KOMODO_ROOT_DIR:-/etc/komodo}"
+                        read -p "Root Directory [$KOMODO_ROOT_DIR]: " KOMODO_ROOT_INPUT
+                        KOMODO_ROOT_DIR="${KOMODO_ROOT_INPUT:-$KOMODO_ROOT_DIR}"
 
                         # Verzeichnis erstellen
-                        KOMODO_DIR="/opt/komodo"
-                        info "Erstelle Komodo Verzeichnis: $KOMODO_DIR"
-                        mkdir -p "$KOMODO_DIR/stacks"
-                        mkdir -p "$KOMODO_DIR/compose"
+                        info "Erstelle Komodo Verzeichnis: $KOMODO_ROOT_DIR"
+                        mkdir -p "$KOMODO_ROOT_DIR"
 
-                        # Docker Compose Datei erstellen
+                        # Docker Compose Datei erstellen (v2 Format)
                         info "Erstelle Docker Compose Konfiguration..."
-                        cat > "$KOMODO_DIR/compose.yml" << EOF
+
+                        # Onboarding Key Zeile nur wenn angegeben
+                        KOMODO_ONBOARDING_LINE=""
+                        if [ -n "$KOMODO_ONBOARDING_KEY" ]; then
+                            KOMODO_ONBOARDING_LINE="      PERIPHERY_ONBOARDING_KEY: $KOMODO_ONBOARDING_KEY"
+                        fi
+
+                        cat > "$KOMODO_ROOT_DIR/compose.yml" << EOF
+####################################
+# 🦎 KOMODO COMPOSE - PERIPHERY 🦎 #
+####################################
+
 services:
-  komodo-agent:
-    image: ghcr.io/moghtech/komodo-periphery:latest
-    labels:
-      komodo.skip:
+  periphery:
+    image: ghcr.io/moghtech/komodo-periphery:2
+    init: true
     restart: unless-stopped
     container_name: komodo-periphery
     environment:
-      PERIPHERY_ROOT_DIRECTORY: /opt/komodo
-      PERIPHERY_PASSKEYS: "$KOMODO_PASSKEY"
-      PERIPHERY_SSL_ENABLED: true
+      PERIPHERY_CORE_ADDRESS: $KOMODO_CORE_ADDRESS
+      PERIPHERY_CONNECT_AS: $KOMODO_SERVER_NAME
+$KOMODO_ONBOARDING_LINE
+      PERIPHERY_CORE_PUBLIC_KEYS: file:/config/keys/core.pub
+      PERIPHERY_ROOT_DIRECTORY: $KOMODO_ROOT_DIR
       PERIPHERY_DISABLE_TERMINALS: false
-      PERIPHERY_INCLUDE_DISK_MOUNTS: /opt/
+      PERIPHERY_DISABLE_CONTAINER_EXEC: false
+      PERIPHERY_INCLUDE_DISK_MOUNTS: /etc/hostname
     volumes:
+      - keys:/config/keys
       - /var/run/docker.sock:/var/run/docker.sock
       - /proc:/proc
-      - /opt:/opt
-    ports:
-      - $KOMODO_BIND_IP:8120:8120
+      - $KOMODO_ROOT_DIR:$KOMODO_ROOT_DIR
+
+volumes:
+  keys:
 EOF
 
-                        success "Docker Compose Datei erstellt: $KOMODO_DIR/compose.yml"
+                        success "Docker Compose Datei erstellt: $KOMODO_ROOT_DIR/compose.yml"
 
                         # Komodo starten
                         echo ""
-                        info "Starte Komodo Periphery Agent..."
-                        cd "$KOMODO_DIR"
+                        info "Starte Komodo Periphery Agent v2..."
+                        cd "$KOMODO_ROOT_DIR"
 
                         if docker compose up -d; then
-                            success "✅ Komodo Periphery Agent erfolgreich gestartet!"
-                            log_action "KOMODO" "Periphery agent started successfully"
+                            success "✅ Komodo Periphery Agent v2 erfolgreich gestartet!"
+                            log_action "KOMODO" "Periphery agent v2 started successfully"
 
                             # Kurz warten und Status prüfen
                             sleep 3
@@ -2892,37 +2899,21 @@ EOF
                         # Status anzeigen
                         echo ""
                         echo -e "${C_GREEN}===========================================${C_RESET}"
-                        echo -e "${C_GREEN}  Komodo Periphery Status${C_RESET}"
+                        echo -e "${C_GREEN}  Komodo Periphery v2 Status${C_RESET}"
                         echo -e "${C_GREEN}===========================================${C_RESET}"
                         echo ""
                         echo -e "${C_BLUE}Verbindungsdetails:${C_RESET}"
-                        echo "  Bind IP: $KOMODO_BIND_IP:8120"
-                        echo "  Passkey: $(mask_secret "$KOMODO_PASSKEY")"
-                        echo "  Konfiguration: $KOMODO_DIR/compose.yml"
+                        echo "  Core Address: $KOMODO_CORE_ADDRESS"
+                        echo "  Server Name: $KOMODO_SERVER_NAME"
+                        echo "  Root Directory: $KOMODO_ROOT_DIR"
+                        echo "  Konfiguration: $KOMODO_ROOT_DIR/compose.yml"
                         echo ""
 
-                        if [ "$KOMODO_BIND_IP" != "0.0.0.0" ]; then
-                            echo -e "${C_GREEN}Komodo ist nur über Tailscale erreichbar.${C_RESET}"
-                            echo "  URL: http://$KOMODO_BIND_IP:8120"
-                        else
-                            echo -e "${C_YELLOW}WARNUNG: Komodo ist an allen Interfaces erreichbar!${C_RESET}"
-                            echo "  Stellen Sie sicher, dass Port 8120 durch Firewall geschützt ist."
-                        fi
-
-                        echo ""
                         echo -e "${C_YELLOW}Nächste Schritte:${C_RESET}"
-                        echo "  1. Gehen Sie zu Ihrer Komodo Core Instanz"
-                        echo "  2. Fügen Sie diesen Server hinzu mit:"
-                        echo "     - Address: $KOMODO_BIND_IP:8120"
-                        echo "     - Passkey: (siehe $KOMODO_DIR/compose.yml)"
+                        echo "  1. Periphery verbindet automatisch zu Komodo Core"
+                        echo "  2. Prüfen Sie in Komodo Core ob der Server erscheint"
+                        echo "  3. Bei Problemen: docker logs komodo-periphery"
                         echo ""
-
-                        # Firewall-Regeln für Komodo
-                        if [ "$FIREWALL_CMD" = "ufw" ] && [ "$KOMODO_BIND_IP" = "0.0.0.0" ]; then
-                            info "Öffne Port 8120 in UFW..."
-                            ufw allow 8120/tcp
-                            success "Port 8120/tcp geöffnet."
-                        fi
 
                         log_action "KOMODO" "Installation completed"
                         break
