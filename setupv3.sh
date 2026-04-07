@@ -2205,9 +2205,19 @@ EOF
     if command -v zpool >/dev/null 2>&1 && zpool list >/dev/null 2>&1; then
         success "ZFS-Dateisystem erkannt."
         if ask_yes_no "Möchten Sie einen ZFS ARC-Cache konfigurieren?" "n"; then
+            # System-RAM anzeigen
+            local total_ram_mb=$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)
+            local total_ram_gb=$((total_ram_mb / 1024))
+            info "Verfügbarer Arbeitsspeicher: ${total_ram_gb}GB (${total_ram_mb}MB)"
+
             # Aktuelle Cache-Größe anzeigen
             local current_arc_max=$(cat /sys/module/zfs/parameters/zfs_arc_max 2>/dev/null || echo "nicht gesetzt")
-            info "Aktueller zfs_arc_max: $current_arc_max Bytes"
+            if [ "$current_arc_max" != "nicht gesetzt" ] && [ "$current_arc_max" -gt 0 ]; then
+                local current_arc_gb=$((current_arc_max / 1024 / 1024 / 1024))
+                info "Aktueller zfs_arc_max: ${current_arc_gb}GB"
+            else
+                info "Aktueller zfs_arc_max: nicht gesetzt (Standard: 50% des RAMs)"
+            fi
 
             read -p "Gewünschte Cache-Größe in GB [z.B. 8]: " zfs_cache_gb
             if [[ "$zfs_cache_gb" =~ ^[0-9]+$ ]] && [ "$zfs_cache_gb" -gt 0 ]; then
@@ -2221,6 +2231,13 @@ EOF
                 sudo mkdir -p /etc/modprobe.d
                 echo "options zfs zfs_arc_max=$cache_bytes" | sudo tee /etc/modprobe.d/zfs.conf >/dev/null
                 success "ZFS ARC-Cache permanent in /etc/modprobe.d/zfs.conf konfiguriert."
+
+                # Initramfs aktualisieren (wichtig für ZFS-Root-Systeme)
+                if command -v update-initramfs >/dev/null 2>&1; then
+                    info "Aktualisiere Initramfs..."
+                    sudo update-initramfs -u
+                    success "Initramfs aktualisiert - Cache-Einstellung wird beim Boot geladen."
+                fi
                 log_action "ZFS" "ARC cache configured to ${zfs_cache_gb}GB"
             else
                 error "Ungültige Eingabe. Cache-Größe muss eine positive Zahl sein."
