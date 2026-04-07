@@ -215,6 +215,66 @@ In der Komodo Core Instanz:
 
 ---
 
+## Pangolin SPK Provisioning
+
+Das Skript unterstützt die automatische Site-Provisionierung mit Pangolin Site Provisioning Keys (SPK).
+
+### So funktioniert es
+
+1. **SPK Key erstellen:**
+   - Gehe zu https://app.pangolin.net/admin/settings/provisioning-keys
+   - Erstelle einen neuen Provisioning Key (optional mit Limit/Ablaufdatum)
+
+2. **Im Setup-Skript:**
+   - Wähle "Pangolin SPK Provisioning" im Menü der optionalen Software
+   - Gib den SPK Key ein (beginnt mit `spk_`)
+   - Der Hostname wird automatisch als Site-Name verwendet
+
+3. **Automatische Einrichtung:**
+   - Docker Container mit `fosrl/newt:latest` wird erstellt
+   - Config wird in `/opt/komodo/stacks/newt_<hostname>/config.json` gespeichert
+   - Container-Name: `newt-<hostname>`
+   - Beim ersten Start tauscht newt den SPK Key gegen echte Zugangsdaten (ID & Secret)
+
+### Wichtige Hinweise
+
+- **Persistenz:** Die `config.json` muss auf dem Host liegen (Volume), damit ID/Secret erhalten bleiben
+- **Kein Volume = Neue Site:** Ohne Volume würde bei jedem Neustart eine NEUE Site erstellt werden
+- **Blueprints:** Optional kann `--provisioning-blueprint-file` für automatische Ressourcen-Erstellung genutzt werden
+
+### Manuelles Docker-Setup
+
+```yaml
+services:
+  newt-meinserver:
+    image: fosrl/newt:latest
+    container_name: newt-meinserver
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/etc/newt/config.json
+    command: >
+      --config-file /etc/newt/config.json
+      --endpoint https://app.pangolin.net
+      --provisioning-key "spk_DEIN_KEY_HIER"
+      --name "meinserver"
+    network_mode: host
+```
+
+### Konfiguration prüfen
+
+```bash
+# Config anzeigen
+cat /opt/komodo/stacks/newt_$(hostname)/config.json
+
+# Container Status
+docker ps --filter name=newt-$(hostname)
+
+# Logs anzeigen
+docker logs newt-$(hostname) --tail 50
+```
+
+---
+
 ## Docker-Konfiguration
 
 Das Skript erstellt automatisch:
@@ -250,7 +310,7 @@ Das Skript erstellt automatisch:
 | Web | NGINX |
 | Monitoring | Prometheus Node Exporter, htop, iotop, nethogs |
 | Administration | ncdu, tmux, DB-Clients, git, zip/unzip |
-| VPN | Tailscale (auto), Komodo Periphery |
+| VPN | Tailscale (auto), Komodo Periphery, Pangolin SPK (newt) |
 
 ---
 
@@ -307,6 +367,7 @@ tailscale up --force-reauth
 
 | Version | Änderungen |
 |---------|------------|
+| 3.6.0 | Pangolin SPK Provisioning für automatische Site-Erstellung |
 | 3.5.0 | GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung |
 | 3.4.0 | Sicherheit: Secret-Masking, Validierung für CIDR/Tags/Passkey |
 | 3.3.0 | Docker, Node.js/npm, Tailscale werden automatisch installiert |

@@ -1,11 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.5.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.6.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
+#
+# Hinzugefügte Features v3.6 (Pangolin SPK Integration):
+# - NEU: Pangolin SPK Provisioning für automatische Site-Erstellung
+# - NEU: Docker Container mit fosrl/newt Image
+# - NEU: Persistente Konfiguration in /opt/pangolin/config.json
+# - NEU: SPK Key Validierung und maskierte Log-Ausgabe
 #
 # Hinzugefügte Features v3.5 (GitHub Integration):
 # - NEU: GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung
@@ -2127,10 +2133,25 @@ if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
             IPV6_POOL_SIZE=64
             MTU_VALUE=1450
 
+            # Docker Swarm Abfrage
+            DOCKER_SWARM_MODE=false
+            if ask_yes_no "Wird dieser Server Teil eines Docker Swarm Clusters?" "n"; then
+                DOCKER_SWARM_MODE=true
+                warning "Docker Swarm Modus: live-restore wird deaktiviert (nicht kompatibel mit Swarm)"
+                log_action "DOCKER" "Docker Swarm mode enabled"
+            fi
+
+            # live-restore nur wenn KEIN Swarm
+            if [ "$DOCKER_SWARM_MODE" = true ]; then
+                LIVE_RESTORE="false"
+            else
+                LIVE_RESTORE="true"
+            fi
+
             sudo tee "$DAEMON_JSON_PATH" > /dev/null <<EOF
 {
   "mtu": $MTU_VALUE,
-  "live-restore": true,
+  "live-restore": $LIVE_RESTORE,
   "metrics-addr": "127.0.0.1:9323",
   "experimental": true,
   "ipv6": true,
@@ -2153,6 +2174,9 @@ if [[ "${SELECTED_MODULES[optional_software]}" == "1" ]]; then
 }
 EOF
             success "Docker daemon.json konfiguriert."
+            if [ "$DOCKER_SWARM_MODE" = true ]; then
+                info "Swarm-Modus: live-restore=false gesetzt"
+            fi
 
             # UFW für Docker konfigurieren
             if [ "$FIREWALL_CMD" = "ufw" ]; then
@@ -2624,6 +2648,21 @@ TSREPO
                 options+=("Komodo Periphery installieren")
                 echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
             fi
+            # Pangolin SPK Provisioning
+            PANGOLIN_CONFIGURED=false
+            PANGOLIN_HOSTNAME="$(hostname)"
+            PANGOLIN_CHECK_DIR="/opt/komodo/stacks/newt_${PANGOLIN_HOSTNAME}"
+            if [ -f "$PANGOLIN_CHECK_DIR/config.json" ] && grep -q '"id"' "$PANGOLIN_CHECK_DIR/config.json" 2>/dev/null; then
+                PANGOLIN_CONFIGURED=true
+            fi
+
+            if [ "$PANGOLIN_CONFIGURED" = true ]; then
+                options+=("Pangolin SPK (✓ konfiguriert)")
+                echo -e " 18. ${C_GREEN}Pangolin SPK Provisioning${C_RESET}: Site Provisioning mit SPK Key $STATUS_INSTALLED"
+            else
+                options+=("Pangolin SPK Provisioning")
+                echo -e " 18. ${C_GREEN}Pangolin SPK Provisioning${C_RESET}: Site Provisioning mit SPK Key $STATUS_AVAILABLE"
+            fi
             # GitHub SSH-Key - Prüfen ob bereits konfiguriert
             GITHUB_SSH_CONFIGURED=false
             if command -v gh >/dev/null 2>&1 && gh auth status &>/dev/null; then
@@ -2637,10 +2676,10 @@ TSREPO
 
             if [ "$GITHUB_SSH_CONFIGURED" = true ]; then
                 options+=("GitHub SSH-Key (✓ konfiguriert)")
-                echo -e " 18. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfiguriert $STATUS_INSTALLED"
+                echo -e " 19. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfiguriert $STATUS_INSTALLED"
             else
                 options+=("GitHub SSH-Key einrichten")
-                echo -e " 18. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
+                echo -e " 19. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
             fi
             echo ""
 
@@ -2937,6 +2976,165 @@ EOF
                         echo ""
 
                         log_action "KOMODO" "Installation completed"
+                        break
+                        ;;
+                    "Pangolin SPK Provisioning"|"Pangolin SPK (✓ konfiguriert)")
+                        info "Richte Pangolin SPK Provisioning ein..."
+                        debug "Starte Pangolin SPK Provisioning Setup"
+                        log_action "PANGOLIN_SPK" "Starting Pangolin SPK provisioning setup"
+
+                        # Prüfen ob Docker installiert ist
+                        if ! command -v docker >/dev/null 2>&1; then
+                            error "Docker ist für Pangolin SPK Provisioning erforderlich!"
+                            error "Bitte installieren Sie zuerst Docker (wird automatisch mit diesem Modul installiert)."
+                            log_action "PANGOLIN_SPK" "Docker not installed"
+                            break
+                        fi
+
+                        echo ""
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo -e "${C_CYAN}  Pangolin SPK Provisioning Setup${C_RESET}"
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo ""
+
+                        # Hostname als Site Name verwenden (immer)
+                        PANGOLIN_SITE_NAME="$(hostname)"
+                        info "Verwende Hostname als Site Name: $PANGOLIN_SITE_NAME"
+
+                        # Prüfen ob bereits konfiguriert
+                        PANGOLIN_CONFIG_DIR="/opt/komodo/stacks/newt_${PANGOLIN_SITE_NAME}"
+                        if [ -f "$PANGOLIN_CONFIG_DIR/config.json" ] && grep -q '"id"' "$PANGOLIN_CONFIG_DIR/config.json" 2>/dev/null; then
+                            success "Pangolin SPK ist bereits konfiguriert."
+                            info "Aktuelle Konfiguration:"
+                            cat "$PANGOLIN_CONFIG_DIR/config.json"
+                            echo ""
+                            if ! ask_yes_no "Möchten Sie die Konfiguration erneut durchführen?" "n"; then
+                                break
+                            fi
+                        fi
+
+                        # Pangolin Endpoint
+                        echo -e "${C_YELLOW}Pangolin Endpoint-URL:${C_RESET}"
+                        echo -e "  (Standard: ${C_GREEN}https://app.pangolin.net${C_RESET})"
+                        echo ""
+                        read -p "Pangolin Endpoint [https://app.pangolin.net]: " PANGOLIN_ENDPOINT
+                        PANGOLIN_ENDPOINT="${PANGOLIN_ENDPOINT:-https://app.pangolin.net}"
+                        info "Verwende Endpoint: $PANGOLIN_ENDPOINT"
+
+                        # Site Provisioning Key (SPK)
+                        echo ""
+                        echo -e "${C_YELLOW}Site Provisioning Key (SPK):${C_RESET}"
+                        echo -e "  ${C_BLUE}Erstelle einen SPK Key unter:${C_RESET}"
+                        echo -e "  ${C_GREEN}https://app.pangolin.net/admin/settings/provisioning-keys${C_RESET}"
+                        echo ""
+                        echo -e "${C_YELLOW}Hinweis: SPK Keys können mit Limits (z.B. max. Verwendungen)${C_RESET}"
+                        echo -e "${C_YELLOW}und Ablaufdatum versehen werden für bessere Sicherheit.${C_RESET}"
+                        echo ""
+
+                        while true; do
+                            read -p "Site Provisioning Key (spk_...): " PANGOLIN_SPK
+                            if [ -z "$PANGOLIN_SPK" ]; then
+                                error "Provisioning Key ist erforderlich."
+                                continue
+                            fi
+                            if [[ "$PANGOLIN_SPK" =~ ^spk_ ]]; then
+                                debug "SPK Key erhalten: $(mask_secret "$PANGOLIN_SPK")"
+                                log_action "PANGOLIN_SPK" "SPK Key provided: $(mask_secret "$PANGOLIN_SPK")"
+                                break
+                            else
+                                error "Ungültiges Key-Format. Muss mit 'spk_' beginnen."
+                            fi
+                        done
+
+                        # Verzeichnis erstellen
+                        info "Erstelle Pangolin Verzeichnis: $PANGOLIN_CONFIG_DIR"
+                        mkdir -p "$PANGOLIN_CONFIG_DIR"
+
+                        # Docker Compose Datei erstellen
+                        info "Erstelle Docker Compose Konfiguration..."
+
+                        cat > "$PANGOLIN_CONFIG_DIR/compose.yml" << EOF
+######################################
+# 🦎 PANGOLIN NEWT COMPOSE 🦎 #
+######################################
+
+services:
+  newt-${PANGOLIN_SITE_NAME}:
+    image: fosrl/newt:latest
+    container_name: newt-${PANGOLIN_SITE_NAME}
+    restart: unless-stopped
+    volumes:
+      # WICHTIG: Config-Datei bleibt auf dem Host erhalten
+      # damit ID/Secret nach dem ersten Start gespeichert werden
+      - ./config.json:/etc/newt/config.json
+    command: >
+      --config-file /etc/newt/config.json
+      --endpoint ${PANGOLIN_ENDPOINT}
+      --provisioning-key "${PANGOLIN_SPK}"
+      --name "${PANGOLIN_SITE_NAME}"
+    network_mode: host
+EOF
+
+                        success "Docker Compose Datei erstellt: $PANGOLIN_CONFIG_DIR/compose.yml"
+
+                        # Leere config.json erstellen (wird von newt befüllt)
+                        if [ ! -f "$PANGOLIN_CONFIG_DIR/config.json" ]; then
+                            echo '{}' > "$PANGOLIN_CONFIG_DIR/config.json"
+                            chmod 600 "$PANGOLIN_CONFIG_DIR/config.json"
+                            success "Leere config.json erstellt (wird bei erstem Start befüllt)"
+                        fi
+
+                        # Pangolin starten
+                        echo ""
+                        info "Starte Pangolin Newt Container..."
+                        cd "$PANGOLIN_CONFIG_DIR"
+
+                        if docker compose up -d; then
+                            success "✅ Pangolin Newt Container erfolgreich gestartet!"
+                            log_action "PANGOLIN_SPK" "Newt container started successfully"
+
+                            # Kurz warten und Status prüfen
+                            sleep 5
+                            if docker ps | grep -q "newt-${PANGOLIN_SITE_NAME}"; then
+                                success "Container läuft: $(docker ps --filter name=newt-${PANGOLIN_SITE_NAME} --format '{{.Status}}')"
+                            fi
+
+                            # Logs anzeigen
+                            echo ""
+                            info "Container Logs:"
+                            docker logs "newt-${PANGOLIN_SITE_NAME}" --tail 20
+                        else
+                            error "Pangolin Newt Container konnte nicht gestartet werden."
+                            log_action "PANGOLIN_SPK" "Failed to start container"
+                            break
+                        fi
+
+                        # Status anzeigen
+                        echo ""
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo -e "${C_GREEN}  Pangolin SPK Provisioning Status${C_RESET}"
+                        echo -e "${C_GREEN}===========================================${C_RESET}"
+                        echo ""
+                        echo -e "${C_BLUE}Konfiguration:${C_RESET}"
+                        echo "  Endpoint: $PANGOLIN_ENDPOINT"
+                        echo "  Site Name: $PANGOLIN_SITE_NAME"
+                        echo "  Config Directory: $PANGOLIN_CONFIG_DIR"
+                        echo "  Compose File: $PANGOLIN_CONFIG_DIR/compose.yml"
+                        echo "  Config File: $PANGOLIN_CONFIG_DIR/config.json"
+                        echo ""
+                        echo -e "${C_YELLOW}Wichtige Hinweise:${C_RESET}"
+                        echo "  1. Der Provisioning Key wird NUR beim ersten Start verwendet"
+                        echo "  2. Danach speichert newt ID/Secret in config.json"
+                        echo "  3. Bei Container-Neustart wird die bestehende Site verwendet"
+                        echo "  4. OHNE config.json Volume würde bei jedem Neustart eine NEUE Site erstellt!"
+                        echo ""
+                        echo -e "${C_YELLOW}Nächste Schritte:${C_RESET}"
+                        echo "  1. Prüfen Sie im Pangolin Dashboard ob die Site erscheint"
+                        echo "  2. Bei Problemen: docker logs newt-${PANGOLIN_SITE_NAME}"
+                        echo "  3. Config prüfen: cat $PANGOLIN_CONFIG_DIR/config.json"
+                        echo ""
+
+                        log_action "PANGOLIN_SPK" "Installation completed"
                         break
                         ;;
                     "GitHub SSH-Key einrichten"|"GitHub SSH-Key (✓ konfiguriert)")
