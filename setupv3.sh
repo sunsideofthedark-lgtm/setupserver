@@ -2796,7 +2796,22 @@ EOF
                         echo -e "${C_CYAN}===========================================${C_RESET}"
                         echo ""
 
+                        # Tailscale IP ermitteln für Port-Bindung
+                        KOMODO_BIND_IP="0.0.0.0"
+                        if command -v tailscale >/dev/null 2>&1; then
+                            TS_IP=$(tailscale ip -4 2>/dev/null)
+                            if [ -n "$TS_IP" ]; then
+                                KOMODO_BIND_IP="$TS_IP"
+                                success "Tailscale IP erkannt: $KOMODO_BIND_IP"
+                            else
+                                warning "Tailscale installiert aber keine IPv4 gefunden. Verwende 0.0.0.0"
+                            fi
+                        else
+                            warning "Tailscale nicht erkannt. Komodo wird an 0.0.0.0 gebunden."
+                        fi
+
                         # Komodo Core Address abfragen
+                        echo ""
                         echo -e "${C_YELLOW}Die Komodo Core Adresse ist die URL Ihrer Komodo Core Instanz.${C_RESET}"
                         echo -e "${C_BLUE}Beispiel: komodo.example.com oder 192.168.1.100:9120${C_RESET}"
                         echo ""
@@ -2807,22 +2822,25 @@ EOF
                             break
                         fi
 
-                        # Server Name abfragen
-                        echo ""
-                        echo -e "${C_YELLOW}Der Server-Name identifiziert diesen Server in Komodo.${C_RESET}"
-                        read -p "Server-Name (connect_as): " KOMODO_SERVER_NAME
+                        # Server Name = Hostname
+                        KOMODO_SERVER_NAME=$(hostname)
+                        info "Server-Name (connect_as): $KOMODO_SERVER_NAME"
 
-                        if [ -z "$KOMODO_SERVER_NAME" ]; then
-                            # Hostname als Fallback
-                            KOMODO_SERVER_NAME=$(hostname)
-                            info "Verwende Hostname als Server-Name: $KOMODO_SERVER_NAME"
-                        fi
-
-                        # Onboarding Key (optional)
+                        # Onboarding Key (PFLICHT)
                         echo ""
-                        echo -e "${C_YELLOW}Onboarding Key ist optional. Erstellen Sie ihn in der Komodo Core UI.${C_RESET}"
-                        echo -e "${C_BLUE}Ermöglicht automatische Server-Erstellung in Komodo.${C_RESET}"
-                        read -p "Onboarding Key (optional, Enter zum Überspringen): " KOMODO_ONBOARDING_KEY
+                        echo -e "${C_YELLOW}Der Onboarding Key wird in der Komodo Core UI erstellt.${C_RESET}"
+                        echo -e "${C_BLUE}Ermöglicht automatische Server-Erstellung und Authentifizierung.${C_RESET}"
+                        echo ""
+
+                        while true; do
+                            read -p "Onboarding Key: " KOMODO_ONBOARDING_KEY
+
+                            if [ -z "$KOMODO_ONBOARDING_KEY" ]; then
+                                error "Onboarding Key ist erforderlich."
+                                continue
+                            fi
+                            break
+                        done
 
                         # Root Directory wählen
                         echo ""
@@ -2838,12 +2856,6 @@ EOF
                         # Docker Compose Datei erstellen (v2 Format)
                         info "Erstelle Docker Compose Konfiguration..."
 
-                        # Onboarding Key Zeile nur wenn angegeben
-                        KOMODO_ONBOARDING_LINE=""
-                        if [ -n "$KOMODO_ONBOARDING_KEY" ]; then
-                            KOMODO_ONBOARDING_LINE="      PERIPHERY_ONBOARDING_KEY: $KOMODO_ONBOARDING_KEY"
-                        fi
-
                         cat > "$KOMODO_ROOT_DIR/compose.yml" << EOF
 ####################################
 # 🦎 KOMODO COMPOSE - PERIPHERY 🦎 #
@@ -2858,7 +2870,7 @@ services:
     environment:
       PERIPHERY_CORE_ADDRESS: $KOMODO_CORE_ADDRESS
       PERIPHERY_CONNECT_AS: $KOMODO_SERVER_NAME
-$KOMODO_ONBOARDING_LINE
+      PERIPHERY_ONBOARDING_KEY: $KOMODO_ONBOARDING_KEY
       PERIPHERY_CORE_PUBLIC_KEYS: file:/config/keys/core.pub
       PERIPHERY_ROOT_DIRECTORY: $KOMODO_ROOT_DIR
       PERIPHERY_DISABLE_TERMINALS: false
@@ -2869,6 +2881,8 @@ $KOMODO_ONBOARDING_LINE
       - /var/run/docker.sock:/var/run/docker.sock
       - /proc:/proc
       - $KOMODO_ROOT_DIR:$KOMODO_ROOT_DIR
+    ports:
+      - $KOMODO_BIND_IP:8120:8120
 
 volumes:
   keys:
@@ -2905,9 +2919,16 @@ EOF
                         echo -e "${C_BLUE}Verbindungsdetails:${C_RESET}"
                         echo "  Core Address: $KOMODO_CORE_ADDRESS"
                         echo "  Server Name: $KOMODO_SERVER_NAME"
+                        echo "  Bind IP: $KOMODO_BIND_IP:8120"
                         echo "  Root Directory: $KOMODO_ROOT_DIR"
                         echo "  Konfiguration: $KOMODO_ROOT_DIR/compose.yml"
                         echo ""
+
+                        if [ "$KOMODO_BIND_IP" != "0.0.0.0" ]; then
+                            echo -e "${C_GREEN}Komodo ist nur über Tailscale erreichbar.${C_RESET}"
+                        else
+                            echo -e "${C_YELLOW}WARNUNG: Komodo ist an allen Interfaces erreichbar!${C_RESET}"
+                        fi
 
                         echo -e "${C_YELLOW}Nächste Schritte:${C_RESET}"
                         echo "  1. Periphery verbindet automatisch zu Komodo Core"
