@@ -3032,17 +3032,17 @@ EOF
                         echo ""
 
                         while true; do
-                            read -p "Site Provisioning Key (spk_...): " PANGOLIN_SPK
+                            read -p "Site Provisioning Key (spk-...): " PANGOLIN_SPK
                             if [ -z "$PANGOLIN_SPK" ]; then
                                 error "Provisioning Key ist erforderlich."
                                 continue
                             fi
-                            if [[ "$PANGOLIN_SPK" =~ ^spk_ ]]; then
+                            if [[ "$PANGOLIN_SPK" =~ ^spk- ]]; then
                                 debug "SPK Key erhalten: $(mask_secret "$PANGOLIN_SPK")"
                                 log_action "PANGOLIN_SPK" "SPK Key provided: $(mask_secret "$PANGOLIN_SPK")"
                                 break
                             else
-                                error "Ungültiges Key-Format. Muss mit 'spk_' beginnen."
+                                error "Ungültiges Key-Format. Muss mit 'spk-' beginnen."
                             fi
                         done
 
