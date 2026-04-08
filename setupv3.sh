@@ -3074,7 +3074,6 @@ services:
       - newt_talk
     environment:
       MTU: 1200
-      PANGOLIN_ENDPOINT: ${PANGOLIN_ENDPOINT}
       DOCKER_SOCKET: /var/run/docker.sock
       NEWT_ACCEPT_CLIENTS: true
     command: >
