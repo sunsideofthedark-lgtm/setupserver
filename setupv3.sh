@@ -2229,15 +2229,15 @@ EOF
     if command -v zpool >/dev/null 2>&1 && zpool list >/dev/null 2>&1; then
         success "ZFS-Dateisystem erkannt."
         if ask_yes_no "Möchten Sie einen ZFS ARC-Cache konfigurieren?" "n"; then
-            # System-RAM anzeigen
-            local total_ram_mb=$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)
-            local total_ram_gb=$((total_ram_mb / 1024))
+            # System-RAM anzeigen (ohne local, da nicht in einer Funktion)
+            total_ram_mb=$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)
+            total_ram_gb=$((total_ram_mb / 1024))
             info "Verfügbarer Arbeitsspeicher: ${total_ram_gb}GB (${total_ram_mb}MB)"
 
             # Aktuelle Cache-Größe anzeigen
-            local current_arc_max=$(cat /sys/module/zfs/parameters/zfs_arc_max 2>/dev/null || echo "nicht gesetzt")
+            current_arc_max=$(cat /sys/module/zfs/parameters/zfs_arc_max 2>/dev/null || echo "nicht gesetzt")
             if [ "$current_arc_max" != "nicht gesetzt" ] && [ "$current_arc_max" -gt 0 ]; then
-                local current_arc_gb=$((current_arc_max / 1024 / 1024 / 1024))
+                current_arc_gb=$((current_arc_max / 1024 / 1024 / 1024))
                 info "Aktueller zfs_arc_max: ${current_arc_gb}GB"
             else
                 info "Aktueller zfs_arc_max: nicht gesetzt (Standard: 50% des RAMs)"
@@ -2245,7 +2245,7 @@ EOF
 
             read -p "Gewünschte Cache-Größe in GB [z.B. 8]: " zfs_cache_gb
             if [[ "$zfs_cache_gb" =~ ^[0-9]+$ ]] && [ "$zfs_cache_gb" -gt 0 ]; then
-                local cache_bytes=$((zfs_cache_gb * 1024 * 1024 * 1024))
+                cache_bytes=$((zfs_cache_gb * 1024 * 1024 * 1024))
 
                 # Temporär setzen
                 echo "$cache_bytes" | sudo tee /sys/module/zfs/parameters/zfs_arc_max >/dev/null
