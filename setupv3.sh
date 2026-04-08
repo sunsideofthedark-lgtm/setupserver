@@ -3063,16 +3063,29 @@ services:
     image: fosrl/newt:latest
     container_name: newt-${PANGOLIN_SITE_NAME}
     restart: unless-stopped
+    hostname: newt-${PANGOLIN_SITE_NAME}
     volumes:
       # WICHTIG: Config-Datei bleibt auf dem Host erhalten
       # damit ID/Secret nach dem ersten Start gespeichert werden
       - ./config.json:/etc/newt/config.json
+      # Docker Socket für Container-Management
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - newt_talk
+    environment:
+      MTU: 1200
+      PANGOLIN_ENDPOINT: ${PANGOLIN_ENDPOINT}
+      DOCKER_SOCKET: /var/run/docker.sock
+      NEWT_ACCEPT_CLIENTS: true
     command: >
       --config-file /etc/newt/config.json
       --endpoint ${PANGOLIN_ENDPOINT}
       --provisioning-key "${PANGOLIN_SPK}"
       --name "${PANGOLIN_SITE_NAME}"
-    network_mode: host
+
+networks:
+  newt_talk:
+    external: true
 EOF
 
                         success "Docker Compose Datei erstellt: $PANGOLIN_CONFIG_DIR/compose.yml"
