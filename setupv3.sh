@@ -2382,11 +2382,15 @@ EOF
             echo ""
 
             if ask_yes_no "Möchten Sie NetBird jetzt konfigurieren?" "y"; then
-                read -p "Geben Sie Ihre NetBird Management-URL ein (Enter für NetBird Cloud): " NB_MGMT_URL
+                read -p "Geben Sie Ihre NetBird Management-URL ein (z.B. https://netbird.example.com, Enter für NetBird Cloud): " NB_MGMT_URL
                 read -p "Geben Sie Ihren NetBird Setup-Key ein (optional): " NB_SETUP_KEY
 
                 NB_CMD="netbird up"
                 if [ -n "$NB_MGMT_URL" ]; then
+                    # Automatisches Hinzufügen von https:// falls kein Protokoll angegeben wurde
+                    if [[ ! "$NB_MGMT_URL" =~ ^https?:// ]]; then
+                        NB_MGMT_URL="https://$NB_MGMT_URL"
+                    fi
                     NB_CMD="$NB_CMD --management-url $NB_MGMT_URL"
                     log_action "NETBIRD" "Management URL provided: $NB_MGMT_URL"
                 fi
