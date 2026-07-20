@@ -1839,25 +1839,38 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
                 sudo -u "$NEW_USER" chmod 755 "$dir"
             done
             
-            # Sichere Gruppenberechtigung für /srv-Zugriff (keine sudoers-Wildcards erforderlich)
+            # Sichere Gruppenberechtigung für /srv- und /opt-Zugriff (keine sudoers-Wildcards erforderlich)
             info "Konfiguriere direkte Gruppenberechtigungen für /srv..."
             mkdir -p /srv
             chown root:"$NEW_USER" /srv
             chmod 2775 /srv
             
+            info "Konfiguriere direkte Gruppenberechtigungen für /opt..."
+            mkdir -p /opt
+            chown -R root:"$NEW_USER" /opt
+            chmod -R 2775 /opt
+            if command -v setfacl &>/dev/null; then
+                setfacl -R -m g:"$NEW_USER":rwx,d:g:"$NEW_USER":rwx /opt 2>/dev/null || true
+            fi
+            
             # Alte/fehlerhafte sudoers-Dateien aufräumen, um Sudo-Parserfehler zu beheben
             if [ -d /etc/sudoers.d ]; then
                 rm -f /etc/sudoers.d/91-*-srv 2>/dev/null || true
+                rm -f /etc/sudoers.d/91-*-opt 2>/dev/null || true
             fi
             
             success "✅ Berechtigungen für '/srv' konfiguriert (Gruppe '$NEW_USER', Mode 2775)"
             info "     Benutzer kann nun 'mkdir -p /srv/projektname' direkt ohne sudo verwenden"
+            
+            success "✅ Berechtigungen für '/opt' konfiguriert (Gruppe '$NEW_USER', Mode 2775)"
+            info "     Benutzer kann nun in '/opt' Dateien/Ordner erstellen, bearbeiten und löschen (ohne sudo)"
             
             success "✅ Arbeitsverzeichnisse für '$NEW_USER' wurden eingerichtet:"
             echo "     • ~/projects/ - Für Entwicklungsprojekte"
             echo "     • ~/scripts/  - Für persönliche Scripts"
             echo "     • ~/backups/  - Für lokale Backups"
             echo "     • /srv/       - Direkt beschreibbar für Projekte (ohne sudo)"
+            echo "     • /opt/       - Direkt beschreibbar für Anwendungen & Software (ohne sudo)"
         fi
     else
         warning "Erstellung eines neuen Benutzers übersprungen."
@@ -1894,6 +1907,18 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
             fi
             
             success "Benutzer '$NEW_USER' wurde zur 'remotessh'-Gruppe hinzugefügt."
+            
+            # Direktzugriff auf /srv und /opt für bestehenden Benutzer konfigurieren
+            info "Konfiguriere direkte Gruppenberechtigungen für /srv und /opt..."
+            mkdir -p /srv /opt
+            chown root:"$NEW_USER" /srv
+            chmod 2775 /srv
+            chown -R root:"$NEW_USER" /opt
+            chmod -R 2775 /opt
+            if command -v setfacl &>/dev/null; then
+                setfacl -R -m g:"$NEW_USER":rwx,d:g:"$NEW_USER":rwx /opt 2>/dev/null || true
+            fi
+            success "✅ Berechtigungen für '/srv' und '/opt' für Benutzer '$NEW_USER' konfiguriert."
             
             export NEW_USER
         fi
