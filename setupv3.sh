@@ -3445,11 +3445,24 @@ do
 done
 EOF
         chmod +x /usr/local/bin/disk-space-monitor.sh
-        if crontab -l 2>/dev/null | grep -q "/usr/local/bin/disk-space-monitor.sh"; then
-            debug "Cronjob für Disk-Space-Monitor existiert bereits."
+        
+        # Cron Paket sicherstellen
+        if ! command -v crontab >/dev/null 2>&1; then
+            info "Installiere 'cron' Paket..."
+            install_package "cron" || install_package "vixie-cron" || true
+            manage_service enable cron 2>/dev/null || manage_service enable crond 2>/dev/null || true
+            manage_service start cron 2>/dev/null || manage_service start crond 2>/dev/null || true
+        fi
+
+        if command -v crontab >/dev/null 2>&1; then
+            if (crontab -l 2>/dev/null || true) | grep -q "/usr/local/bin/disk-space-monitor.sh"; then
+                debug "Cronjob für Disk-Space-Monitor existiert bereits."
+            else
+                ( (crontab -l 2>/dev/null || true); echo "0 2 * * * /usr/local/bin/disk-space-monitor.sh" ) | crontab - 2>/dev/null || true
+                debug "Cronjob für Disk-Space-Monitor hinzugefügt."
+            fi
         else
-            (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/disk-space-monitor.sh") | crontab -
-            debug "Cronjob für Disk-Space-Monitor hinzugefügt."
+            warning "crontab nicht verfügbar - Cronjob wurde nicht eingerichtet."
         fi
         
         success "System-Wartung konfiguriert."
@@ -3474,6 +3487,9 @@ if [[ "${SELECTED_MODULES[root_security]}" == "1" ]]; then
         exit 1
     fi
 
+    # Alte/fehlerhafte sudoers-Dateien mit Wildcards aufräumen
+    rm -f /etc/sudoers.d/91-*-srv 2>/dev/null || true
+
     # Erweiterte sudo-Konfiguration für bessere Sicherheit
     debug "Konfiguriere erweiterte sudo-Sicherheit"
     if [ -d /etc/sudoers.d ]; then
@@ -3484,8 +3500,8 @@ Defaults pwfeedback
 # Defaults logfile="/var/log/sudo.log" # Deaktiviert wegen Inkompatibilität mit manchen Sudo-Parsern (z.B. sudo-rs)
 # Defaults log_input, log_output       # Deaktiviert wegen Inkompatibilität mit manchen Sudo-Parsern (z.B. sudo-rs)
 EOF
-        # Sudoers-Syntax prüfen
-        if command -v visudo >/dev/null 2>&1 && ! visudo -c >/dev/null 2>&1; then
+        # Sudoers-Syntax für diese spezifische Datei prüfen
+        if command -v visudo >/dev/null 2>&1 && ! visudo -c -f /etc/sudoers.d/90-admin-security >/dev/null 2>&1; then
             error "Sudoers-Syntaxprüfung nach Schreiben von 90-admin-security fehlerhaft! Entferne Konfiguration..."
             rm -f /etc/sudoers.d/90-admin-security
         else
