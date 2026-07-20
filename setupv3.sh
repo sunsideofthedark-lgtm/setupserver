@@ -221,6 +221,10 @@ setup_firewall() {
     
     case "$FIREWALL_CMD" in
         ufw)
+            if ! command -v ufw >/dev/null 2>&1; then
+                info "Installiere 'ufw' Paket..."
+                install_package "ufw"
+            fi
             echo "[INFO] Konfiguriere UFW-Firewall"
             # IPv6-Unterstützung in UFW aktivieren
             if [ -f /etc/default/ufw ]; then
@@ -255,6 +259,10 @@ setup_firewall() {
             echo "y" | ufw enable
             ;;
         firewall-cmd)
+            if ! command -v firewall-cmd >/dev/null 2>&1; then
+                info "Installiere 'firewalld' Paket..."
+                install_package "firewalld"
+            fi
             echo "[INFO] Konfiguriere firewalld (Regeln gelten für IPv4 & IPv6)"
             systemctl enable firewalld
             systemctl start firewalld
