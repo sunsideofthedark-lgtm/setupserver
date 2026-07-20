@@ -2385,7 +2385,7 @@ EOF
                 read -p "Geben Sie Ihre NetBird Management-URL ein (z.B. https://netbird.example.com, Enter für NetBird Cloud): " NB_MGMT_URL
                 read -p "Geben Sie Ihren NetBird Setup-Key ein (optional): " NB_SETUP_KEY
 
-                NB_CMD="netbird up"
+                NB_CMD="netbird up --allow-server-ssh --enable-ssh-root"
                 if [ -n "$NB_MGMT_URL" ]; then
                     # Automatisches Hinzufügen von https:// falls kein Protokoll angegeben wurde
                     if [[ ! "$NB_MGMT_URL" =~ ^https?:// ]]; then
@@ -2416,6 +2416,7 @@ EOF
                     echo "  IPv4: ${NB_IPV4:-wird zugewiesen...}"
                     [ -n "$NB_IPV6" ] && echo "  IPv6: $NB_IPV6"
                     echo ""
+                    echo "  NetBird SSH: Aktiviert (--allow-server-ssh --enable-ssh-root)"
                     [ -n "$NB_MGMT_URL" ] && echo "  Management Server: $NB_MGMT_URL"
                     echo ""
 
