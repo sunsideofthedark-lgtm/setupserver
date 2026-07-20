@@ -1909,7 +1909,8 @@ if [[ "${SELECTED_MODULES[ssh_hardening]}" == "1" ]]; then
     if confirm "Soll der SSH-Dienst gehärtet werden (Port ändern, Key-Auth erzwingen)?"; then
         # 5.1 SSH-Port ändern
         DEFAULT_SSH_PORT=22
-        CURRENT_SSH_PORT=$(grep "^Port" $SSH_CONFIG | awk '{print $2}' || echo "22")
+        CURRENT_SSH_PORT=$(grep -E "^Port\s+" $SSH_CONFIG 2>/dev/null | awk '{print $2}' | tail -n1)
+        CURRENT_SSH_PORT=${CURRENT_SSH_PORT:-22}
         info "Aktueller SSH-Port: $CURRENT_SSH_PORT"
         debug "Aktueller SSH-Port: $CURRENT_SSH_PORT"
         
@@ -1920,10 +1921,13 @@ if [[ "${SELECTED_MODULES[ssh_hardening]}" == "1" ]]; then
             
             # Port-Validierung mit verbesserter Funktion
             if validate_port "$SSH_PORT"; then
-                # Überprüfen ob Port bereits verwendet wird
+                # Überprüfen ob Port bereits verwendet wird (außer es ist bereits der aktuelle SSH-Port)
                 debug "Prüfe Port-Verfügbarkeit: $SSH_PORT"
-                if netstat -tuln 2>/dev/null | grep -q ":$SSH_PORT " || ss -tuln 2>/dev/null | grep -q ":$SSH_PORT "; then
-                    error "Port $SSH_PORT wird bereits verwendet. Bitte wählen Sie einen anderen Port."
+                if [ "$SSH_PORT" -eq "$CURRENT_SSH_PORT" ] 2>/dev/null; then
+                    info "Port $SSH_PORT ist bereits der aktuelle SSH-Port."
+                    break
+                elif netstat -tuln 2>/dev/null | grep -q ":$SSH_PORT " || ss -tuln 2>/dev/null | grep -q ":$SSH_PORT "; then
+                    error "Port $SSH_PORT wird bereits von einem anderen Dienst verwendet. Bitte wählen Sie einen anderen Port."
                     continue
                 fi
                 break
