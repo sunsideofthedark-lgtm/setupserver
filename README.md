@@ -64,7 +64,7 @@ Diese Pakete werden automatisch installiert, wenn das Modul "Optionale Software"
 |----------|--------------|
 | **Docker** | Container-Plattform mit IPv6-Unterstützung |
 | **Node.js/npm** | JavaScript Runtime v20.x LTS |
-| **Tailscale** | Mesh-VPN mit SSH und Exit Node |
+| **NetBird** | Mesh-VPN (unterstützt Cloud & Self-Hosted Management) |
 
 ### Module (auswählbar)
 
@@ -122,19 +122,16 @@ Das Skript bietet zwei Modi:
 1. **Komplettes Setup** - Alle Module werden ausgeführt
 2. **Modulare Auswahl** - Einzelne Module auswählen
 
-### 5. Tailscale konfigurieren
+### 5. NetBird VPN konfigurieren
 
-Bei der Installation wird nach einem Tailscale Auth-Key gefragt:
+Bei der Installation wird nach den NetBird Verbindungsdaten gefragt:
 
-1. Gehe zu https://login.tailscale.com/admin/settings/keys
-2. Erstelle einen **Reusable** Key
-3. Füge den Key im Skript ein
+1. **Management URL**: Gib deine eigene Management-URL ein (z.B. `https://netbird.deinedomain.com`) oder drücke Enter für die NetBird Cloud.
+2. **Setup Key**: Gib optional deinen Setup-Key zur automatischen Authentifizierung ein.
 
-**Optionen:**
-- SSH: Automatisch aktiviert
-- Exit Node: Automatisch advertised
-- Subnet Router: Optional (CIDR eingeben)
-- Tags: Optional (z.B. `tag:server,tag:prod`)
+**Eigenschaften:**
+- Interface: `wt0` (automatisch in UFW freigegeben)
+- IP-Erkennung: IPv4 & IPv6 werden automatisch ermittelt
 
 ### 6. Komodo Periphery (optional)
 
@@ -193,14 +190,17 @@ sudo reboot
 
 ---
 
-## Tailscale - Exit Node aktivieren
+## NetBird - Status prüfen & verbinden
 
-Nach dem Setup muss der Exit Node in der Tailscale Admin-Console approved werden:
+Nach dem Setup kann der Status von NetBird jederzeit abgefragt werden:
 
-1. Gehe zu https://login.tailscale.com/admin/machines
-2. Klicke auf den Server
-3. Aktiviere "Exit Node"
-4. Speichern
+```bash
+# Status anzeigen
+netbird status
+
+# Detaillierte Verbindungsinformationen
+netbird status -d
+```
 
 ---
 
@@ -210,7 +210,7 @@ In der Komodo Core Instanz:
 
 1. Gehe zu "Servers" → "Add Server"
 2. Trage ein:
-   - **Address:** `<TAILSCALE_IP>:8120` (oder `0.0.0.0:8120`)
+   - **Address:** `<NETBIRD_IP>:8120` (oder `0.0.0.0:8120`)
    - **Passkey:** (siehe `/opt/komodo/compose.yml`)
 
 ---
@@ -306,11 +306,11 @@ Das Skript erstellt automatisch:
 
 | Kategorie | Pakete |
 |-----------|--------|
-| Sicherheit | Fail2Ban, ClamAV |
-| Web | NGINX |
-| Monitoring | Prometheus Node Exporter, htop, iotop, nethogs |
-| Administration | ncdu, tmux, DB-Clients, git, zip/unzip |
-| VPN | Tailscale (auto), Komodo Periphery, Pangolin SPK (newt) |
+| **Sicherheit** | Fail2Ban, CrowdSec (mit Docker/Nginx Collections & Firewall-Bouncer), ClamAV, UFW Extras |
+| **Web** | NGINX |
+| **Monitoring** | Prometheus Node Exporter, htop, iotop, nethogs |
+| **Administration** | ncdu, tmux, DB-Clients, git, zip/unzip |
+| **VPN** | NetBird (auto), Komodo Periphery, Pangolin SPK (newt) |
 
 ---
 
@@ -318,7 +318,8 @@ Das Skript erstellt automatisch:
 
 - Auth-Keys und Passkeys werden im Log maskiert
 - CIDR-Notation wird validiert
-- Tailscale Tags werden auf korrektes Format geprüft
+- visudo-Syntaxprüfung schützt vor Sudoers-Konfigurationsfehlern
+- /srv Verzeichnis wird mit Gruppenberechtigungen (2775) konfiguriert (vermeidet Wildcard-Probleme)
 - Komodo Passkey muss min. 20 Zeichen haben
 
 ---
@@ -367,6 +368,7 @@ tailscale up --force-reauth
 
 | Version | Änderungen |
 |---------|------------|
+| 3.7.0 | Sudoers Fix (sudo-rs), NetBird VPN (Self-Hosted), CrowdSec + Docker Collection |
 | 3.6.0 | Pangolin SPK Provisioning für automatische Site-Erstellung |
 | 3.5.0 | GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung |
 | 3.4.0 | Sicherheit: Secret-Masking, Validierung für CIDR/Tags/Passkey |

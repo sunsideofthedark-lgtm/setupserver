@@ -1,17 +1,19 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.6.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.7.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
 #
-# Hinzugefügte Features v3.6 (Pangolin SPK Integration):
-# - NEU: Pangolin SPK Provisioning für automatische Site-Erstellung
-# - NEU: Docker Container mit fosrl/newt Image
-# - NEU: Persistente Konfiguration in /opt/pangolin/config.json
-# - NEU: SPK Key Validierung und maskierte Log-Ausgabe
+# Hinzugefügte Features v3.7 (Sudoers Fix, NetBird & CrowdSec Integration):
+# - FIX: Sudoers logfile & log_input/log_output Optionen deaktiviert (Kompatibilität mit sudo-rs)
+# - FIX: /srv Berechtigungen direkt auf Mode 2775 gesetzt (Vermeidet Sudo-Wildcard-Fehler)
+# - NEU: visudo -c Syntaxprüfung für generierte Sudoers-Dateien
+# - NEU: NetBird VPN Integration (inkl. Support für eigene Management-URLs)
+# - NEU: CrowdSec Security Engine + Firewall Bouncer + Docker/Nginx Collections
+# - FIX: Vermeidung doppelter Cronjob-Einträge bei der Systemwartung
 #
 # Hinzugefügte Features v3.5 (GitHub Integration):
 # - NEU: GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung
@@ -1829,31 +1831,25 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
                 sudo -u "$NEW_USER" chmod 755 "$dir"
             done
             
-            # Spezielle Berechtigung für /srv-Zugriff (für Docker-Projekte etc.)
-            info "Konfiguriere sichere /srv-Zugriffe für Docker-Projekte..."
+            # Sichere Gruppenberechtigung für /srv-Zugriff (keine sudoers-Wildcards erforderlich)
+            info "Konfiguriere direkte Gruppenberechtigungen für /srv..."
+            mkdir -p /srv
+            chown root:"$NEW_USER" /srv
+            chmod 2775 /srv
             
-            # Benutzer zur docker-Gruppe hinzufügen (falls Docker installiert wird)
-            if command -v docker >/dev/null 2>&1 || is_package_installed "docker" "docker"; then
-                debug "Füge Benutzer zur docker-Gruppe hinzu"
-                usermod -aG docker "$NEW_USER" 2>/dev/null || true
-            fi
-            
-            # Sichere sudo-Konfiguration für /srv-Zugriff
+            # Alte/fehlerhafte sudoers-Dateien aufräumen, um Sudo-Parserfehler zu beheben
             if [ -d /etc/sudoers.d ]; then
-                cat > "/etc/sudoers.d/91-${NEW_USER}-srv" << EOF
-# Sichere /srv-Zugriffe für Benutzer $NEW_USER
-$NEW_USER ALL=(root) NOPASSWD: /bin/mkdir -p /srv/*, /bin/chown $NEW_USER\\:$NEW_USER /srv/*, /bin/chmod 755 /srv/*
-EOF
-                success "✅ Sichere /srv-Zugriffe für '$NEW_USER' konfiguriert"
-                info "     Benutzer kann nun 'sudo mkdir -p /srv/projektname' verwenden"
-                info "     Anschließend: 'sudo chown $NEW_USER:$NEW_USER /srv/projektname'"
+                rm -f /etc/sudoers.d/91-*-srv 2>/dev/null || true
             fi
+            
+            success "✅ Berechtigungen für '/srv' konfiguriert (Gruppe '$NEW_USER', Mode 2775)"
+            info "     Benutzer kann nun 'mkdir -p /srv/projektname' direkt ohne sudo verwenden"
             
             success "✅ Arbeitsverzeichnisse für '$NEW_USER' wurden eingerichtet:"
             echo "     • ~/projects/ - Für Entwicklungsprojekte"
             echo "     • ~/scripts/  - Für persönliche Scripts"
             echo "     • ~/backups/  - Für lokale Backups"
-            echo "     • /srv/* - Sichere sudo-Zugriffe für Server-Projekte"
+            echo "     • /srv/       - Direkt beschreibbar für Projekte (ohne sudo)"
         fi
     else
         warning "Erstellung eines neuen Benutzers übersprungen."
@@ -1877,10 +1873,10 @@ EOF
             else
                 error "Erstellung der remotessh-Gruppe fehlgeschlagen"
                 exit 1
-                fi
-            else
-                success "Gruppe 'remotessh' wurde erstellt."
             fi
+        else
+            success "Gruppe 'remotessh' wurde erstellt."
+        fi
             
             # Bestehenden Benutzer zur remotessh-Gruppe hinzufügen
             debug "Füge existierenden Benutzer zur remotessh-Gruppe hinzu"
@@ -2322,189 +2318,103 @@ EOF
         fi
     fi
 
-    # === TAILSCALE AUTOMATISCH INSTALLIEREN (v3.3) ===
-    echo ""
-    info "Prüfe Tailscale Installation..."
+    # === ALTES TAILSCALE CLEANUP (falls aktiv) ===
     if command -v tailscale >/dev/null 2>&1; then
-        success "Tailscale ist bereits installiert: $(tailscale version 2>/dev/null | head -1)"
+        info "Deaktiviere altes Tailscale..."
+        systemctl stop tailscaled 2>/dev/null || true
+        systemctl disable tailscaled 2>/dev/null || true
+    fi
+
+    # === NETBIRD AUTOMATISCH INSTALLIEREN (v3.4) ===
+    echo ""
+    info "Prüfe NetBird Installation..."
+    if command -v netbird >/dev/null 2>&1; then
+        success "NetBird ist bereits installiert: $(netbird version 2>/dev/null || echo 'installiert')"
         info "Führe Konfiguration aus..."
     else
-        info "Installiere Tailscale automatisch..."
-        debug "Starte Tailscale Installation"
-        log_action "TAILSCALE" "Starting automatic Tailscale installation"
+        info "Installiere NetBird automatisch..."
+        debug "Starte NetBird Installation"
+        log_action "NETBIRD" "Starting automatic NetBird installation"
 
-        case "$OS_ID" in
-            ubuntu|debian)
-                install_package "curl gnupg"
-                curl -fsSL https://pkgs.tailscale.com/stable/$OS_ID/$(lsb_release -sc).noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
-                curl -fsSL https://pkgs.tailscale.com/stable/$OS_ID/$(lsb_release -sc).tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list >/dev/null
-                $PKG_UPDATE
-                install_package "tailscale"
-                ;;
-            centos|rhel|rocky|almalinux)
-                install_package "curl"
-                cat > /etc/yum.repos.d/tailscale.repo << 'TSREPO'
-[tailscale-stable]
-name=Tailscale stable
-baseurl=https://pkgs.tailscale.com/stable/rhel/$releasever/$basearch
-enabled=1
-type=rpm
-gpgcheck=1
-gpgkey=https://pkgs.tailscale.com/stable/rhel/$releasever/repo.gpg
-TSREPO
-                install_package "tailscale"
-                ;;
-            fedora)
-                install_package "curl"
-                cat > /etc/yum.repos.d/tailscale.repo << 'TSREPO'
-[tailscale-stable]
-name=Tailscale stable
-baseurl=https://pkgs.tailscale.com/stable/fedora/$releasever/$basearch
-enabled=1
-type=rpm
-gpgcheck=1
-gpgkey=https://pkgs.tailscale.com/stable/fedora/$releasever/repo.gpg
-TSREPO
-                install_package "tailscale"
-                ;;
-            opensuse*|sles)
-                zypper ar -g -r https://pkgs.tailscale.com/stable/opensuse/tailscale.repo
-                install_package "tailscale"
-                ;;
-            arch)
-                install_package "tailscale"
-                ;;
-            *)
-                warning "Kein offizielles Repo für $OS_ID. Versuche universelle Installation..."
-                install_package "curl"
-                curl -fsSL https://tailscale.com/install.sh | sh
-                ;;
-        esac
-
-        # systemd Service aktivieren
-        systemctl enable tailscaled
-        systemctl start tailscaled
-
-        if command -v tailscale >/dev/null 2>&1; then
-            success "✅ Tailscale erfolgreich installiert"
-            log_action "TAILSCALE" "Tailscale installed successfully"
+        # Universelles offizielles NetBird-Installationsskript
+        install_package "curl"
+        if curl -fsSL https://pkgs.netbird.io/install.sh | sh; then
+            success "✅ NetBird erfolgreich installiert"
+            log_action "NETBIRD" "NetBird installed successfully"
         else
-            error "Tailscale Installation fehlgeschlagen"
-            log_action "TAILSCALE" "Installation failed"
+            error "NetBird Installation fehlgeschlagen"
+            log_action "NETBIRD" "Installation failed"
         fi
     fi
 
-    # Tailscale konfigurieren
-    if command -v tailscale >/dev/null 2>&1; then
+    # NetBird Service aktivieren & starten
+    manage_service enable netbird 2>/dev/null || manage_service enable netbird-backend 2>/dev/null || true
+    manage_service start netbird 2>/dev/null || manage_service start netbird-backend 2>/dev/null || true
+
+    # NetBird konfigurieren
+    if command -v netbird >/dev/null 2>&1; then
         echo ""
         echo -e "${C_CYAN}===========================================${C_RESET}"
-        echo -e "${C_CYAN}  Tailscale Konfiguration${C_RESET}"
+        echo -e "${C_CYAN}  NetBird Konfiguration${C_RESET}"
         echo -e "${C_CYAN}===========================================${C_RESET}"
         echo ""
 
         # Prüfen ob bereits verbunden
-        if tailscale status >/dev/null 2>&1; then
-            success "Tailscale ist bereits verbunden."
-            TS_IPV4=$(tailscale ip -4 2>/dev/null)
-            echo "  Tailscale IPv4: $TS_IPV4"
+        if netbird status 2>/dev/null | grep -iq "connected"; then
+            success "NetBird ist bereits verbunden."
+            NB_IPV4=$(ip -o -4 addr show wt0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+            [ -z "$NB_IPV4" ] && NB_IPV4=$(netbird status 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' | cut -d/ -f1 | head -n1)
+            echo "  NetBird IPv4: ${NB_IPV4:-nicht ermittelbar}"
         else
-            echo -e "${C_YELLOW}Um Tailscale zu aktivieren, benötigen Sie einen Auth-Key.${C_RESET}"
-            echo -e "${C_BLUE}Erstellen Sie einen Key unter: https://login.tailscale.com/admin/settings/keys${C_RESET}"
+            echo -e "${C_YELLOW}NetBird ermöglicht VPN-Verbindungen (auch mit eigenen Management-Servern).${C_RESET}"
             echo ""
 
-            if ask_yes_no "Möchten Sie Tailscale jetzt konfigurieren?" "y"; then
-                read -p "Bitte geben Sie Ihren Tailscale Auth-Key ein: " TS_AUTH_KEY
+            if ask_yes_no "Möchten Sie NetBird jetzt konfigurieren?" "y"; then
+                read -p "Geben Sie Ihre NetBird Management-URL ein (Enter für NetBird Cloud): " NB_MGMT_URL
+                read -p "Geben Sie Ihren NetBird Setup-Key ein (optional): " NB_SETUP_KEY
 
-                if [ -n "$TS_AUTH_KEY" ]; then
-                    # Auth-Key maskiert loggen
-                    debug "Auth-Key erhalten: $(mask_secret "$TS_AUTH_KEY")"
-                    log_action "TAILSCALE" "Auth-Key provided: $(mask_secret "$TS_AUTH_KEY")"
+                NB_CMD="netbird up"
+                if [ -n "$NB_MGMT_URL" ]; then
+                    NB_CMD="$NB_CMD --management-url $NB_MGMT_URL"
+                    log_action "NETBIRD" "Management URL provided: $NB_MGMT_URL"
+                fi
+                if [ -n "$NB_SETUP_KEY" ]; then
+                    NB_CMD="$NB_CMD --setup-key $NB_SETUP_KEY"
+                    log_action "NETBIRD" "Setup-Key provided: $(mask_secret "$NB_SETUP_KEY")"
+                fi
 
-                    TS_HOSTNAME=$(hostname)
-                    TS_CMD="tailscale up --auth-key=$TS_AUTH_KEY --ssh --advertise-exit-node --hostname=$TS_HOSTNAME"
-
-                    info ""
-                    echo -e "${C_GREEN}Standard-Konfiguration:${C_RESET}"
-                    echo "  ✅ Tailscale SSH: Aktiviert"
-                    echo "  ✅ Exit Node: Wird advertised"
-                    echo "  ✅ Hostname: $TS_HOSTNAME"
-                    echo ""
-
-                    # Optional: Subnet Router mit Validierung
-                    TS_ADVERTISE_ROUTES=""
-                    if ask_yes_no "Soll dieser Server als Subnet Router fungieren?" "n"; then
-                        while true; do
-                            read -p "Geben Sie die CIDR ein (z.B. 192.168.1.0/24): " TS_ADVERTISE_ROUTES
-                            if [ -z "$TS_ADVERTISE_ROUTES" ]; then
-                                break
-                            elif validate_cidr "$TS_ADVERTISE_ROUTES"; then
-                                TS_CMD="$TS_CMD --advertise-routes=$TS_ADVERTISE_ROUTES"
-                                success "CIDR validiert: $TS_ADVERTISE_ROUTES"
-                                log_action "TAILSCALE" "Subnet routes: $TS_ADVERTISE_ROUTES"
-                                break
-                            else
-                                error "Ungültige CIDR-Notation. Beispiel: 192.168.1.0/24"
-                            fi
-                        done
-                    fi
-
-                    # Optional: Tags mit Validierung
-                    TS_TAGS=""
-                    if ask_yes_no "Möchten Sie Tags für diesen Node setzen?" "n"; then
-                        while true; do
-                            read -p "Geben Sie Tags ein (z.B. tag:server,tag:prod): " TS_TAGS
-                            if [ -z "$TS_TAGS" ]; then
-                                break
-                            elif validate_tags "$TS_TAGS"; then
-                                TS_CMD="$TS_CMD --advertise-tags=$TS_TAGS"
-                                success "Tags validiert: $TS_TAGS"
-                                log_action "TAILSCALE" "Tags: $TS_TAGS"
-                                break
-                            else
-                                error "Ungültiges Tag-Format. Tags müssen mit 'tag:' beginnen und nur Buchstaben, Zahlen, _ und - enthalten."
-                                echo "Beispiel: tag:server,tag:prod,tag:exit-node"
-                            fi
-                        done
-                    fi
+                info ""
+                info "Verbinde mit NetBird ($NB_CMD)..."
+                if eval $NB_CMD; then
+                    success "✅ NetBird erfolgreich verbunden/gestartet!"
+                    NB_IPV4=$(ip -o -4 addr show wt0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+                    [ -z "$NB_IPV4" ] && NB_IPV4=$(netbird status 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' | cut -d/ -f1 | head -n1)
+                    NB_IPV6=$(ip -o -6 addr show wt0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
 
                     echo ""
-                    info "Verbinde mit Tailscale..."
-                    if eval $TS_CMD; then
-                        success "✅ Tailscale erfolgreich verbunden!"
-                        TS_IPV4=$(tailscale ip -4 2>/dev/null)
-                        TS_IPV6=$(tailscale ip -6 2>/dev/null)
-                        echo ""
-                        echo -e "${C_GREEN}===========================================${C_RESET}"
-                        echo -e "${C_GREEN}  Tailscale Status${C_RESET}"
-                        echo -e "${C_GREEN}===========================================${C_RESET}"
-                        echo ""
-                        echo -e "${C_BLUE}IP-Adressen:${C_RESET}"
-                        echo "  IPv4: $TS_IPV4"
-                        echo "  IPv6: $TS_IPV6"
-                        echo ""
-                        echo -e "${C_BLUE}Konfiguration:${C_RESET}"
-                        echo "  Hostname: $TS_HOSTNAME"
-                        echo "  SSH: Aktiviert"
-                        echo "  Exit Node: Advertised"
-                        [ -n "$TS_ADVERTISE_ROUTES" ] && echo "  Subnet Routes: $TS_ADVERTISE_ROUTES"
-                        [ -n "$TS_TAGS" ] && echo "  Tags: $TS_TAGS"
-                        echo ""
-                        echo -e "${C_YELLOW}Hinweis: Exit Node und Subnet Routes müssen in der Admin-Console approved werden.${C_RESET}"
-                        echo ""
+                    echo -e "${C_GREEN}===========================================${C_RESET}"
+                    echo -e "${C_GREEN}  NetBird Status${C_RESET}"
+                    echo -e "${C_GREEN}===========================================${C_RESET}"
+                    echo ""
+                    echo -e "${C_BLUE}IP-Adressen:${C_RESET}"
+                    echo "  IPv4: ${NB_IPV4:-wird zugewiesen...}"
+                    [ -n "$NB_IPV6" ] && echo "  IPv6: $NB_IPV6"
+                    echo ""
+                    [ -n "$NB_MGMT_URL" ] && echo "  Management Server: $NB_MGMT_URL"
+                    echo ""
 
-                        # UFW für Tailscale
-                        if [ "$FIREWALL_CMD" = "ufw" ]; then
-                            ufw allow in on tailscale0 2>/dev/null || true
-                        fi
-
-                        log_action "TAILSCALE" "Successfully connected to tailnet"
-                    else
-                        error "Tailscale-Verbindung fehlgeschlagen"
-                        log_action "TAILSCALE" "Connection failed"
+                    # UFW für NetBird (wt0 Interface)
+                    if [ "$FIREWALL_CMD" = "ufw" ]; then
+                        ufw allow in on wt0 2>/dev/null || true
                     fi
+
+                    log_action "NETBIRD" "Successfully connected to NetBird"
+                else
+                    error "NetBird-Verbindung fehlgeschlagen"
+                    log_action "NETBIRD" "Connection failed"
                 fi
             else
-                info "Tailscale-Konfiguration übersprungen. Später mit 'tailscale up' konfigurieren."
+                info "NetBird-Konfiguration übersprungen. Später mit 'netbird up' konfigurieren."
             fi
         fi
     fi
@@ -2533,14 +2443,21 @@ TSREPO
                 options+=("Fail2Ban installieren")
                 echo -e "  1. ${C_GREEN}Fail2Ban${C_RESET}: Schutz vor Brute-Force-Angriffen auf SSH $STATUS_AVAILABLE"
             fi
+            if is_package_installed "crowdsec" "crowdsec"; then
+                options+=("CrowdSec (✓ installiert)")
+                echo -e "  2. ${C_GREEN}CrowdSec${C_RESET}: Moderner IPS/Brute-Force-Schutz mit Firewall Bouncer $STATUS_INSTALLED"
+            else
+                options+=("CrowdSec installieren")
+                echo -e "  2. ${C_GREEN}CrowdSec${C_RESET}: Moderner IPS/Brute-Force-Schutz mit Firewall Bouncer $STATUS_AVAILABLE"
+            fi
             options+=("UFW Extras konfigurieren")
-            echo -e "  2. ${C_GREEN}UFW Extras${C_RESET}: Erweiterte Firewall-Regeln und Logging $STATUS_AVAILABLE"
+            echo -e "  3. ${C_GREEN}UFW Extras${C_RESET}: Erweiterte Firewall-Regeln und Logging $STATUS_AVAILABLE"
             if is_package_installed "clamav" "clamscan"; then
                 options+=("ClamAV (✓ installiert)")
-                echo -e "  3. ${C_GREEN}ClamAV${C_RESET}: Antivirus-Scanner für Server $STATUS_INSTALLED"
+                echo -e "  4. ${C_GREEN}ClamAV${C_RESET}: Antivirus-Scanner für Server $STATUS_INSTALLED"
             else
                 options+=("ClamAV installieren")
-                echo -e "  3. ${C_GREEN}ClamAV${C_RESET}: Antivirus-Scanner für Server $STATUS_AVAILABLE"
+                echo -e "  4. ${C_GREEN}ClamAV${C_RESET}: Antivirus-Scanner für Server $STATUS_AVAILABLE"
             fi
             echo ""
 
@@ -2548,14 +2465,14 @@ TSREPO
             echo -e "${C_YELLOW}🌐 Web & Container:${C_RESET}"
             if is_package_installed "nginx" "nginx"; then
                 options+=("NGINX (✓ installiert)")
-                echo -e "  4. ${C_GREEN}NGINX${C_RESET}: Hochleistungs-Webserver & Reverse Proxy $STATUS_INSTALLED"
+                echo -e "  5. ${C_GREEN}NGINX${C_RESET}: Hochleistungs-Webserver & Reverse Proxy $STATUS_INSTALLED"
             else
                 options+=("NGINX installieren")
-                echo -e "  4. ${C_GREEN}NGINX${C_RESET}: Hochleistungs-Webserver & Reverse Proxy $STATUS_AVAILABLE"
+                echo -e "  5. ${C_GREEN}NGINX${C_RESET}: Hochleistungs-Webserver & Reverse Proxy $STATUS_AVAILABLE"
             fi
             # Docker wird automatisch installiert - nur Status anzeigen
             if command -v docker >/dev/null 2>&1; then
-                echo -e "  5. ${C_GREEN}Docker${C_RESET}: Container-Plattform ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
+                echo -e "  6. ${C_GREEN}Docker${C_RESET}: Container-Plattform ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
             fi
             echo ""
             
@@ -2563,31 +2480,31 @@ TSREPO
             echo -e "${C_YELLOW}📊 Monitoring & Performance:${C_RESET}"
             if is_package_installed "node_exporter" "node_exporter"; then
                 options+=("Node Exporter (✓ installiert)")
-                echo -e "  6. ${C_GREEN}Prometheus Node Exporter${C_RESET}: System-Metriken für Monitoring $STATUS_INSTALLED"
+                echo -e "  7. ${C_GREEN}Prometheus Node Exporter${C_RESET}: System-Metriken für Monitoring $STATUS_INSTALLED"
             else
                 options+=("Prometheus Node Exporter installieren")
-                echo -e "  6. ${C_GREEN}Prometheus Node Exporter${C_RESET}: System-Metriken für Monitoring $STATUS_AVAILABLE"
+                echo -e "  7. ${C_GREEN}Prometheus Node Exporter${C_RESET}: System-Metriken für Monitoring $STATUS_AVAILABLE"
             fi
             if is_package_installed "htop" "htop"; then
                 options+=("htop (✓ installiert)")
-                echo -e "  7. ${C_GREEN}htop${C_RESET}: Verbesserter System-Monitor $STATUS_INSTALLED"
+                echo -e "  8. ${C_GREEN}htop${C_RESET}: Verbesserter System-Monitor $STATUS_INSTALLED"
             else
                 options+=("htop installieren")
-                echo -e "  7. ${C_GREEN}htop${C_RESET}: Verbesserter System-Monitor $STATUS_AVAILABLE"
+                echo -e "  8. ${C_GREEN}htop${C_RESET}: Verbesserter System-Monitor $STATUS_AVAILABLE"
             fi
             if is_package_installed "iotop" "iotop"; then
                 options+=("iotop (✓ installiert)")
-                echo -e "  8. ${C_GREEN}iotop${C_RESET}: I/O-Monitor für Festplatten-Performance $STATUS_INSTALLED"
+                echo -e "  9. ${C_GREEN}iotop${C_RESET}: I/O-Monitor für Festplatten-Performance $STATUS_INSTALLED"
             else
                 options+=("iotop installieren")
-                echo -e "  8. ${C_GREEN}iotop${C_RESET}: I/O-Monitor für Festplatten-Performance $STATUS_AVAILABLE"
+                echo -e "  9. ${C_GREEN}iotop${C_RESET}: I/O-Monitor für Festplatten-Performance $STATUS_AVAILABLE"
             fi
             if is_package_installed "nethogs" "nethogs"; then
                 options+=("nethogs (✓ installiert)")
-                echo -e "  9. ${C_GREEN}nethogs${C_RESET}: Netzwerk-Traffic-Monitor pro Prozess $STATUS_INSTALLED"
+                echo -e " 10. ${C_GREEN}nethogs${C_RESET}: Netzwerk-Traffic-Monitor pro Prozess $STATUS_INSTALLED"
             else
                 options+=("nethogs installieren")
-                echo -e "  9. ${C_GREEN}nethogs${C_RESET}: Netzwerk-Traffic-Monitor pro Prozess $STATUS_AVAILABLE"
+                echo -e " 10. ${C_GREEN}nethogs${C_RESET}: Netzwerk-Traffic-Monitor pro Prozess $STATUS_AVAILABLE"
             fi
             echo ""
             
@@ -2595,58 +2512,58 @@ TSREPO
             echo -e "${C_YELLOW}🛠️ Administration:${C_RESET}"
             if is_package_installed "ncdu" "ncdu"; then
                 options+=("ncdu (✓ installiert)")
-                echo -e " 10. ${C_GREEN}ncdu${C_RESET}: Interaktiver Festplatten-Analysator $STATUS_INSTALLED"
+                echo -e " 11. ${C_GREEN}ncdu${C_RESET}: Interaktiver Festplatten-Analysator $STATUS_INSTALLED"
             else
                 options+=("ncdu installieren")
-                echo -e " 10. ${C_GREEN}ncdu${C_RESET}: Interaktiver Festplatten-Analysator $STATUS_AVAILABLE"
+                echo -e " 11. ${C_GREEN}ncdu${C_RESET}: Interaktiver Festplatten-Analysator $STATUS_AVAILABLE"
             fi
             if is_package_installed "tmux" "tmux"; then
                 options+=("tmux (✓ installiert)")
-                echo -e " 11. ${C_GREEN}tmux${C_RESET}: Terminal-Multiplexer für persistente Sessions $STATUS_INSTALLED"
+                echo -e " 12. ${C_GREEN}tmux${C_RESET}: Terminal-Multiplexer für persistente Sessions $STATUS_INSTALLED"
             else
                 options+=("tmux installieren")
-                echo -e " 11. ${C_GREEN}tmux${C_RESET}: Terminal-Multiplexer für persistente Sessions $STATUS_AVAILABLE"
+                echo -e " 12. ${C_GREEN}tmux${C_RESET}: Terminal-Multiplexer für persistente Sessions $STATUS_AVAILABLE"
             fi
             if is_package_installed "mariadb-client" "mysql" && is_package_installed "postgresql-client" "psql"; then
                  options+=("DB-Clients (✓ installiert)")
-                 echo -e " 12. ${C_GREEN}Datenbank-Clients${C_RESET}: CLI-Tools für MariaDB & PostgreSQL $STATUS_INSTALLED"
+                 echo -e " 13. ${C_GREEN}Datenbank-Clients${C_RESET}: CLI-Tools für MariaDB & PostgreSQL $STATUS_INSTALLED"
             else
                  options+=("Datenbank-Clients installieren")
-                 echo -e " 12. ${C_GREEN}Datenbank-Clients${C_RESET}: CLI-Tools für MariaDB & PostgreSQL $STATUS_AVAILABLE"
+                 echo -e " 13. ${C_GREEN}Datenbank-Clients${C_RESET}: CLI-Tools für MariaDB & PostgreSQL $STATUS_AVAILABLE"
             fi
             if is_package_installed "git" "git"; then
                 options+=("git (✓ installiert)")
-                echo -e " 13. ${C_GREEN}git${C_RESET}: Versionskontrolle für Konfigurationen $STATUS_INSTALLED"
+                echo -e " 14. ${C_GREEN}git${C_RESET}: Versionskontrolle für Konfigurationen $STATUS_INSTALLED"
             else
                 options+=("git installieren")
-                echo -e " 13. ${C_GREEN}git${C_RESET}: Versionskontrolle für Konfigurationen $STATUS_AVAILABLE"
+                echo -e " 14. ${C_GREEN}git${C_RESET}: Versionskontrolle für Konfigurationen $STATUS_AVAILABLE"
             fi
             if is_package_installed "zip" "zip" && is_package_installed "unzip" "unzip"; then
                 options+=("zip/unzip (✓ installiert)")
-                echo -e " 14. ${C_GREEN}zip/unzip${C_RESET}: Archivierungs-Tools $STATUS_INSTALLED"
+                echo -e " 15. ${C_GREEN}zip/unzip${C_RESET}: Archivierungs-Tools $STATUS_INSTALLED"
             else
                 options+=("zip/unzip installieren")
-                echo -e " 14. ${C_GREEN}zip/unzip${C_RESET}: Archivierungs-Tools $STATUS_AVAILABLE"
+                echo -e " 15. ${C_GREEN}zip/unzip${C_RESET}: Archivierungs-Tools $STATUS_AVAILABLE"
             fi
             # Node.js/npm wird automatisch installiert - nur Status anzeigen
             if command -v npm >/dev/null 2>&1; then
-                echo -e " 15. ${C_GREEN}Node.js/npm${C_RESET}: JavaScript Runtime ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
+                echo -e " 16. ${C_GREEN}Node.js/npm${C_RESET}: JavaScript Runtime ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
             fi
             echo ""
 
             # --- VPN & NETWORKING ---
             echo -e "${C_YELLOW}🌐 VPN & Networking:${C_RESET}"
-            # Tailscale wird automatisch installiert - nur Status anzeigen
-            if command -v tailscale >/dev/null 2>&1; then
-                echo -e " 16. ${C_GREEN}Tailscale${C_RESET}: Mesh-VPN ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
+            # NetBird wird automatisch installiert - nur Status anzeigen
+            if command -v netbird >/dev/null 2>&1; then
+                echo -e " 17. ${C_GREEN}NetBird${C_RESET}: Mesh-VPN ${C_GREEN}✓ [AUTOMATISCH INSTALLIERT]${C_RESET}"
             fi
             # Komodo Periphery Agent
             if docker ps 2>/dev/null | grep -q "komodo-periphery"; then
                 options+=("Komodo Periphery (✓ installiert)")
-                echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_INSTALLED"
+                echo -e " 18. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_INSTALLED"
             else
                 options+=("Komodo Periphery installieren")
-                echo -e " 17. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
+                echo -e " 18. ${C_GREEN}Komodo Periphery Agent${C_RESET}: Docker-Verwaltung über Komodo Core $STATUS_AVAILABLE"
             fi
             # Pangolin SPK Provisioning
             PANGOLIN_CONFIGURED=false
@@ -2658,10 +2575,10 @@ TSREPO
 
             if [ "$PANGOLIN_CONFIGURED" = true ]; then
                 options+=("Pangolin SPK (✓ konfiguriert)")
-                echo -e " 18. ${C_GREEN}Pangolin SPK Provisioning${C_RESET}: Site Provisioning mit SPK Key $STATUS_INSTALLED"
+                echo -e " 19. ${C_GREEN}Pangolin SPK Provisioning${C_RESET}: Site Provisioning mit SPK Key $STATUS_INSTALLED"
             else
                 options+=("Pangolin SPK Provisioning")
-                echo -e " 18. ${C_GREEN}Pangolin SPK Provisioning${C_RESET}: Site Provisioning mit SPK Key $STATUS_AVAILABLE"
+                echo -e " 19. ${C_GREEN}Pangolin SPK Provisioning${C_RESET}: Site Provisioning mit SPK Key $STATUS_AVAILABLE"
             fi
             # GitHub SSH-Key - Prüfen ob bereits konfiguriert
             GITHUB_SSH_CONFIGURED=false
@@ -2676,10 +2593,10 @@ TSREPO
 
             if [ "$GITHUB_SSH_CONFIGURED" = true ]; then
                 options+=("GitHub SSH-Key (✓ konfiguriert)")
-                echo -e " 19. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfiguriert $STATUS_INSTALLED"
+                echo -e " 20. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfiguriert $STATUS_INSTALLED"
             else
                 options+=("GitHub SSH-Key einrichten")
-                echo -e " 19. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
+                echo -e " 20. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
             fi
             echo ""
 
@@ -2709,6 +2626,46 @@ EOF
                         fi
                         break
                         ;;
+                    "CrowdSec installieren"|"CrowdSec (✓ installiert)")
+                        info "Installiere CrowdSec Security Engine..."
+                        log_action "CROWDSEC" "Starting CrowdSec installation"
+                        if ! is_package_installed "crowdsec" "crowdsec"; then
+                            info "Füge CrowdSec Repository hinzu..."
+                            install_package "curl"
+                            curl -s https://install.crowdsec.net | sh
+                            $PKG_UPDATE 2>/dev/null || true
+                            info "Installiere CrowdSec Security Engine und Firewall-Bouncer..."
+                            install_package "crowdsec"
+                            install_package "crowdsec-firewall-bouncer-iptables"
+                            manage_service enable crowdsec 2>/dev/null || true
+                            manage_service start crowdsec 2>/dev/null || true
+                            
+                            # Collections installieren
+                            if command -v cscli >/dev/null 2>&1; then
+                                info "Installiere CrowdSec Collections..."
+                                if command -v docker >/dev/null 2>&1; then
+                                    info "Installiere crowdsecurity/docker Collection..."
+                                    cscli collections install crowdsecurity/docker 2>/dev/null || true
+                                fi
+                                if is_package_installed "nginx" "nginx"; then
+                                    info "Installiere crowdsecurity/nginx Collection..."
+                                    cscli collections install crowdsecurity/nginx 2>/dev/null || true
+                                fi
+                                systemctl reload crowdsec 2>/dev/null || true
+                            fi
+                            success "✅ CrowdSec und Firewall-Bouncer erfolgreich installiert und konfiguriert."
+                            log_action "CROWDSEC" "CrowdSec installed successfully"
+                        else
+                            warning "CrowdSec ist bereits installiert."
+                            if command -v cscli >/dev/null 2>&1; then
+                                if command -v docker >/dev/null 2>&1; then
+                                    cscli collections install crowdsecurity/docker 2>/dev/null || true
+                                fi
+                                systemctl reload crowdsec 2>/dev/null || true
+                            fi
+                        fi
+                        break
+                        ;;
                     "UFW Extras konfigurieren")
                         info "Konfiguriere erweiterte UFW-Firewall-Einstellungen..."
                         if [ "$FIREWALL_CMD" = "ufw" ]; then
@@ -2734,6 +2691,11 @@ EOF
                             manage_service enable nginx
                             manage_service start nginx
                             success "NGINX installiert und gestartet."
+                            if command -v cscli >/dev/null 2>&1; then
+                                info "Füge CrowdSec Nginx-Collection hinzu..."
+                                cscli collections install crowdsecurity/nginx 2>/dev/null || true
+                                systemctl reload crowdsec 2>/dev/null || true
+                            fi
                         else
                             warning "NGINX ist bereits installiert."
                         fi
@@ -2835,18 +2797,19 @@ EOF
                         echo -e "${C_CYAN}===========================================${C_RESET}"
                         echo ""
 
-                        # Tailscale IP ermitteln für Port-Bindung
+                        # NetBird IP ermitteln für Port-Bindung
                         KOMODO_BIND_IP="0.0.0.0"
-                        if command -v tailscale >/dev/null 2>&1; then
-                            TS_IP=$(tailscale ip -4 2>/dev/null)
-                            if [ -n "$TS_IP" ]; then
-                                KOMODO_BIND_IP="$TS_IP"
-                                success "Tailscale IP erkannt: $KOMODO_BIND_IP"
+                        if command -v netbird >/dev/null 2>&1; then
+                            NB_IP=$(ip -o -4 addr show wt0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+                            [ -z "$NB_IP" ] && NB_IP=$(netbird status 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' | cut -d/ -f1 | head -n1)
+                            if [ -n "$NB_IP" ]; then
+                                KOMODO_BIND_IP="$NB_IP"
+                                success "NetBird IP erkannt: $KOMODO_BIND_IP"
                             else
-                                warning "Tailscale installiert aber keine IPv4 gefunden. Verwende 0.0.0.0"
+                                warning "NetBird installiert aber keine IPv4 gefunden. Verwende 0.0.0.0"
                             fi
                         else
-                            warning "Tailscale nicht erkannt. Komodo wird an 0.0.0.0 gebunden."
+                            warning "NetBird nicht erkannt. Komodo wird an 0.0.0.0 gebunden."
                         fi
 
                         # Komodo Core Address abfragen
@@ -2964,7 +2927,7 @@ EOF
                         echo ""
 
                         if [ "$KOMODO_BIND_IP" != "0.0.0.0" ]; then
-                            echo -e "${C_GREEN}Komodo ist nur über Tailscale erreichbar.${C_RESET}"
+                            echo -e "${C_GREEN}Komodo ist nur über VPN (NetBird) erreichbar.${C_RESET}"
                         else
                             echo -e "${C_YELLOW}WARNUNG: Komodo ist an allen Interfaces erreichbar!${C_RESET}"
                         fi
@@ -3470,7 +3433,12 @@ do
 done
 EOF
         chmod +x /usr/local/bin/disk-space-monitor.sh
-        (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/disk-space-monitor.sh") | crontab -
+        if crontab -l 2>/dev/null | grep -q "/usr/local/bin/disk-space-monitor.sh"; then
+            debug "Cronjob für Disk-Space-Monitor existiert bereits."
+        else
+            (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/disk-space-monitor.sh") | crontab -
+            debug "Cronjob für Disk-Space-Monitor hinzugefügt."
+        fi
         
         success "System-Wartung konfiguriert."
     else
@@ -3501,10 +3469,16 @@ if [[ "${SELECTED_MODULES[root_security]}" == "1" ]]; then
 Defaults timestamp_timeout=15
 Defaults passwd_timeout=5
 Defaults pwfeedback
-Defaults logfile="/var/log/sudo.log"
-Defaults log_input, log_output
+# Defaults logfile="/var/log/sudo.log" # Deaktiviert wegen Inkompatibilität mit manchen Sudo-Parsern (z.B. sudo-rs)
+# Defaults log_input, log_output       # Deaktiviert wegen Inkompatibilität mit manchen Sudo-Parsern (z.B. sudo-rs)
 EOF
-        success "✅ Erweiterte sudo-Sicherheit konfiguriert"
+        # Sudoers-Syntax prüfen
+        if command -v visudo >/dev/null 2>&1 && ! visudo -c >/dev/null 2>&1; then
+            error "Sudoers-Syntaxprüfung nach Schreiben von 90-admin-security fehlerhaft! Entferne Konfiguration..."
+            rm -f /etc/sudoers.d/90-admin-security
+        else
+            success "✅ Erweiterte sudo-Sicherheit konfiguriert"
+        fi
     fi
 
     # Root-Passwort entfernen
