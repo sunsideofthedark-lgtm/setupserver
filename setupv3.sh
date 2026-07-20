@@ -2995,17 +2995,24 @@ EOF
 
                         # Pangolin Endpoint
                         echo -e "${C_YELLOW}Pangolin Endpoint-URL:${C_RESET}"
-                        echo -e "  (Standard: ${C_GREEN}https://app.pangolin.net${C_RESET})"
+                        echo -e "  (Standard: ${C_GREEN}https://pangolin.sunriseing.dev${C_RESET})"
                         echo ""
-                        read -p "Pangolin Endpoint [https://app.pangolin.net]: " PANGOLIN_ENDPOINT
-                        PANGOLIN_ENDPOINT="${PANGOLIN_ENDPOINT:-https://app.pangolin.net}"
+                        read -p "Pangolin Endpoint [https://pangolin.sunriseing.dev]: " PANGOLIN_ENDPOINT
+                        PANGOLIN_ENDPOINT="${PANGOLIN_ENDPOINT:-https://pangolin.sunriseing.dev}"
+                        # Sicherstellen, dass der Endpoint mit https:// beginnt und keinen Slash am Ende hat
+                        if [[ "$PANGOLIN_ENDPOINT" =~ ^http:// ]]; then
+                            PANGOLIN_ENDPOINT="https://${PANGOLIN_ENDPOINT#http://}"
+                        elif [[ ! "$PANGOLIN_ENDPOINT" =~ ^https:// ]]; then
+                            PANGOLIN_ENDPOINT="https://${PANGOLIN_ENDPOINT}"
+                        fi
+                        PANGOLIN_ENDPOINT="${PANGOLIN_ENDPOINT%/}"
                         info "Verwende Endpoint: $PANGOLIN_ENDPOINT"
 
                         # Site Provisioning Key (SPK)
                         echo ""
                         echo -e "${C_YELLOW}Site Provisioning Key (SPK):${C_RESET}"
                         echo -e "  ${C_BLUE}Erstelle einen SPK Key unter:${C_RESET}"
-                        echo -e "  ${C_GREEN}https://app.pangolin.net/admin/settings/provisioning-keys${C_RESET}"
+                        echo -e "  ${C_GREEN}https://pangolin.sunriseing.dev/admin/settings/provisioning-keys${C_RESET}"
                         echo ""
                         echo -e "${C_YELLOW}Hinweis: SPK Keys können mit Limits (z.B. max. Verwendungen)${C_RESET}"
                         echo -e "${C_YELLOW}und Ablaufdatum versehen werden für bessere Sicherheit.${C_RESET}"
