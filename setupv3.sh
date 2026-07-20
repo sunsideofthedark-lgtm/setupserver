@@ -3593,7 +3593,18 @@ if command -v docker >/dev/null 2>&1 && [[ "${SELECTED_MODULES[optional_software
             error "  -> [newt_talk] IPv6-Verbindung nach außen ist fehlgeschlagen!"
         fi
     fi
+fi
 
+# Kopiere Setup-Skript nach /opt/setup/ für spätere Ausführung
+info "Speichere Setup-Skript in /opt/setup/ für spätere Aufrufe..."
+mkdir -p /opt/setup
+SCRIPT_SRC="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+if [ -f "$SCRIPT_SRC" ]; then
+    cp "$SCRIPT_SRC" /opt/setup/setupv3.sh 2>/dev/null || true
+    chmod +x /opt/setup/setupv3.sh 2>/dev/null || true
+    SCRIPT_DIR="$(dirname "$SCRIPT_SRC")"
+    [ -f "$SCRIPT_DIR/README.md" ] && cp "$SCRIPT_DIR/README.md" /opt/setup/README.md 2>/dev/null || true
+    success "✅ Setup-Skript unter '/opt/setup/setupv3.sh' gespeichert."
 fi
 
 info "📋 Setup-Log wurde gespeichert unter: $LOGFILE"
