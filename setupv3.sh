@@ -1922,6 +1922,182 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
             
             export NEW_USER
         fi
+
+        # 4.2 Backup-Benutzer 'dbbackup' anlegen (optional)
+        echo ""
+        if confirm "Soll ein Backup-Benutzer 'dbbackup' (nur SSH-Key-Authentifizierung) erstellt werden?"; then
+            info "Erstelle Backup-Benutzer 'dbbackup'..."
+            
+            # Falls Benutzer bereits existiert, optional neu anlegen
+            if id "dbbackup" &>/dev/null; then
+                warning "Benutzer 'dbbackup' existiert bereits."
+                if confirm "Soll der bestehende Benutzer 'dbbackup' gelöscht und neu erstellt werden?"; then
+                    pkill -u dbbackup 2>/dev/null || true
+                    sleep 1
+                    userdel -r dbbackup 2>/dev/null || true
+                    success "Bestehender Benutzer 'dbbackup' wurde gelöscht."
+                fi
+            fi
+            
+            if ! id "dbbackup" &>/dev/null; then
+                # Benutzer ohne Passwort erstellen (gesperrter Account für Passwort-Login)
+                if ! useradd -m -s /bin/bash -p '*' dbbackup; then
+                    error "Erstellung des Benutzers 'dbbackup' fehlgeschlagen"
+                    exit 1
+                fi
+                success "Benutzer 'dbbackup' wurde erfolgreich erstellt."
+            fi
+            
+            # Zur remotessh-Gruppe hinzufügen
+            if ! usermod -aG remotessh dbbackup; then
+                error "Hinzufügen von 'dbbackup' zur remotessh-Gruppe fehlgeschlagen"
+                exit 1
+            fi
+            success "Benutzer 'dbbackup' zur 'remotessh'-Gruppe hinzugefügt."
+            
+            # SSH-Verzeichnis konfigurieren
+            DB_HOME=$(eval echo ~dbbackup)
+            mkdir -p "$DB_HOME/.ssh"
+            chmod 700 "$DB_HOME/.ssh"
+            chown dbbackup:dbbackup "$DB_HOME/.ssh"
+            
+            # SSH Public Key abfragen
+            while true; do
+                echo -e "${C_CYAN}Bitte kopieren Sie den SSH Public Key für 'dbbackup' (z.B. ssh-ed25519 AAA...):${C_RESET}"
+                read -r DB_SSH_KEY
+                # Einfache Validierung (sollte nicht leer sein und mit ssh- oder ecdsa- beginnen)
+                if [[ -z "$DB_SSH_KEY" ]]; then
+                    warning "Der SSH Public Key darf nicht leer sein."
+                    continue
+                fi
+                if [[ "$DB_SSH_KEY" =~ ^(ssh-|ecdsa-|sk-ssh-|sk-ecdsa-) ]]; then
+                    echo "$DB_SSH_KEY" > "$DB_HOME/.ssh/authorized_keys"
+                    chmod 600 "$DB_HOME/.ssh/authorized_keys"
+                    chown dbbackup:dbbackup "$DB_HOME/.ssh/authorized_keys"
+                    success "SSH Public Key für 'dbbackup' wurde erfolgreich hinterlegt."
+                    break
+                else
+                    warning "Ungültiges SSH-Key-Format. Bitte stellen Sie sicher, dass der Key mit einem gültigen Typ beginnt (z.B. ssh-ed25519 oder ssh-rsa)."
+                fi
+            done
+            DBBACKUP_CREATED=1
+        else
+            DBBACKUP_CREATED=0
+        fi
+
+        # 4.3 Geteiltes Verzeichnis konfigurieren (optional)
+        echo ""
+        if confirm "Soll ein geteiltes Verzeichnis für administrative Benutzergruppen eingerichtet werden?"; then
+            info "Konfiguriere geteiltes Verzeichnis..."
+            
+            # Verzeichnispfad abfragen
+            while true; do
+                read -p "Bitte geben Sie den Pfad des geteilten Verzeichnisses an [Standard: /opt]: " SHARED_DIR
+                SHARED_DIR=${SHARED_DIR:-/opt}
+                # Pfad muss absolut sein
+                if [[ "$SHARED_DIR" =~ ^/ ]]; then
+                    break
+                else
+                    warning "Der Pfad muss absolut sein (mit / beginnen)."
+                fi
+            done
+            
+            # Gruppenname abfragen
+            while true; do
+                read -p "Bitte geben Sie den Namen der neuen Admin-Gruppe an [Standard: opt-admins]: " SHARED_GROUP
+                SHARED_GROUP=${SHARED_GROUP:-opt-admins}
+                if [[ "$SHARED_GROUP" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+                    break
+                else
+                    warning "Ungültiger Gruppenname. Nur Buchstaben, Zahlen, Bindestriche und Unterstriche erlaubt."
+                fi
+            done
+            
+            # Gruppe erstellen
+            if ! getent group "$SHARED_GROUP" >/dev/null; then
+                if groupadd "$SHARED_GROUP"; then
+                    success "Gruppe '$SHARED_GROUP' wurde erfolgreich erstellt."
+                else
+                    error "Erstellung der Gruppe '$SHARED_GROUP' fehlgeschlagen"
+                    exit 1
+                fi
+            else
+                warning "Gruppe '$SHARED_GROUP' existiert bereits."
+            fi
+            
+            # Standardbenutzer hinzufügen
+            local group_users=("root" "$NEW_USER")
+            if [[ "$DBBACKUP_CREATED" == "1" ]] || id "dbbackup" &>/dev/null; then
+                group_users+=("dbbackup")
+            fi
+            
+            # Weitere Benutzer abfragen
+            # Liste aller Systembenutzer mit UID >= 1000 ermitteln (ohne nobody)
+            local system_users=($(awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd))
+            # Bereits ausgewählte Benutzer ausschließen
+            local available_users=()
+            for u in "${system_users[@]}"; do
+                local skip=0
+                for su in "${group_users[@]}"; do
+                    if [[ "$u" == "$su" ]]; then
+                        skip=1
+                        break
+                    fi
+                done
+                if [[ "$skip" == "0" ]]; then
+                    available_users+=("$u")
+                fi
+            done
+            
+            if [ ${#available_users[@]} -gt 0 ]; then
+                echo -e "${C_BLUE}Verfügbare zusätzliche Systembenutzer:${C_RESET} ${available_users[*]}"
+                read -p "Möchten Sie zusätzliche Benutzer zur Gruppe '$SHARED_GROUP' hinzufügen? (kommagetrennt, leer lassen für keine): " ADD_USERS_INPUT
+                if [ -n "$ADD_USERS_INPUT" ]; then
+                    IFS=',' read -ra ADDITIONAL_USER_LIST <<< "$ADD_USERS_INPUT"
+                    for user_to_add in "${ADDITIONAL_USER_LIST[@]}"; do
+                        # Whitespace trimmen
+                        user_to_add=$(echo "$user_to_add" | xargs)
+                        if id "$user_to_add" &>/dev/null; then
+                            group_users+=("$user_to_add")
+                        else
+                            warning "Benutzer '$user_to_add' existiert nicht und wird übersprungen."
+                        fi
+                    done
+                fi
+            fi
+            
+            # Benutzer der Gruppe hinzufügen
+            info "Füge Benutzer zur Gruppe '$SHARED_GROUP' hinzu..."
+            for user_in_group in "${group_users[@]}"; do
+                debug "Füge $user_in_group zu $SHARED_GROUP hinzu"
+                if usermod -aG "$SHARED_GROUP" "$user_in_group"; then
+                    success "Benutzer '$user_in_group' zur Gruppe '$SHARED_GROUP' hinzugefügt."
+                else
+                    warning "Fehler beim Hinzufügen von '$user_in_group' zur Gruppe '$SHARED_GROUP'."
+                fi
+            done
+            
+            # Verzeichnis erstellen falls nicht vorhanden
+            mkdir -p "$SHARED_DIR"
+            
+            # 1. Eigentümer auf root und Gruppe auf $SHARED_GROUP setzen
+            info "Setze Eigentümer von $SHARED_DIR auf root:$SHARED_GROUP..."
+            chown -R root:"$SHARED_GROUP" "$SHARED_DIR"
+            
+            # 2. Schreib- und Leserechte für den Eigentümer (root) und die Gruppe geben, SGID-Bit setzen (chmod 2775 oder g+s)
+            info "Konfiguriere Berechtigungen (Mode 2775 / SGID) für $SHARED_DIR..."
+            chmod -R 2775 "$SHARED_DIR"
+            
+            # Falls setfacl vorhanden, Standard-ACLs setzen
+            if command -v setfacl &>/dev/null; then
+                debug "Konfiguriere ACLs für $SHARED_DIR"
+                setfacl -R -m g:"$SHARED_GROUP":rwx,d:g:"$SHARED_GROUP":rwx "$SHARED_DIR" 2>/dev/null || true
+            fi
+            
+            success "✅ Geteiltes Verzeichnis '$SHARED_DIR' wurde für die Gruppe '$SHARED_GROUP' konfiguriert."
+            info "     Mitglieder: ${group_users[*]}"
+            info "     Berechtigungen: Besitzer: root, Gruppe: $SHARED_GROUP, Mode: 2775 (SGID)"
+        fi
 else
     info "⏭️  Benutzerverwaltung übersprungen (Modul nicht ausgewählt)"
 fi
