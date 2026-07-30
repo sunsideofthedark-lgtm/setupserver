@@ -2816,6 +2816,20 @@ EOF
                 options+=("GitHub SSH-Key einrichten")
                 echo -e " 20. ${C_GREEN}GitHub SSH-Key${C_RESET}: Key generieren und für GitHub konfigurieren $STATUS_AVAILABLE"
             fi
+
+            # Omnisight Agent - Prüfen ob bereits installiert
+            OMNISIGHT_INSTALLED=false
+            if systemctl list-unit-files omnisight-agent.service &>/dev/null || command -v omnisight-agent &>/dev/null; then
+                OMNISIGHT_INSTALLED=true
+            fi
+
+            if [ "$OMNISIGHT_INSTALLED" = true ]; then
+                options+=("Omnisight Agent (✓ installiert)")
+                echo -e " 21. ${C_GREEN}Omnisight Agent${C_RESET}: Omnisight Monitoring & Logging Agent $STATUS_INSTALLED"
+            else
+                options+=("Omnisight Agent installieren")
+                echo -e " 21. ${C_GREEN}Omnisight Agent${C_RESET}: Omnisight Monitoring & Logging Agent $STATUS_AVAILABLE"
+            fi
             echo ""
 
             options+=("Fertig")
@@ -3590,6 +3604,45 @@ EOF
                         echo -e "${C_BLUE}Git Commits werden als:${C_RESET} $GH_HOSTNAME <${GH_HOSTNAME}@${GH_DOMAIN}>"
                         echo ""
                         log_action "GITHUB_SSH" "Manual setup completed"
+                        break
+                        ;;
+                    "Omnisight Agent installieren"|"Omnisight Agent (✓ installiert)")
+                        echo ""
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo -e "${C_CYAN}  Omnisight Agent Konfiguration${C_RESET}"
+                        echo -e "${C_CYAN}===========================================${C_RESET}"
+                        echo ""
+
+                        # OMNISIGHT_URL abfragen (mit default)
+                        read -p "Omnisight URL [https://omnisight.sunriseing.dev]: " OMNI_URL
+                        OMNI_URL="${OMNI_URL:-https://omnisight.sunriseing.dev}"
+
+                        # OMNISIGHT_TOKEN abfragen (Pflichtfeld)
+                        while true; do
+                            read -p "Omnisight Token: " OMNI_TOKEN
+                            if [ -z "$OMNI_TOKEN" ]; then
+                                error "Ein Token ist erforderlich."
+                                continue
+                            fi
+                            break
+                        done
+
+                        # OMNISIGHT_AGENT_ROLE abfragen (mit default)
+                        read -p "Omnisight Agent Rolle [linux]: " OMNI_ROLE
+                        OMNI_ROLE="${OMNI_ROLE:-linux}"
+
+                        # Installation ausführen
+                        info "Installiere Omnisight Agent..."
+                        log_action "OMNISIGHT" "Installing Omnisight Agent with URL: $OMNI_URL, Role: $OMNI_ROLE"
+
+                        # Skript herunterladen und ausführen (als root, da das Hauptskript bereits als root läuft)
+                        if curl -fsSL "${OMNI_URL}/agent/install.sh" | OMNISIGHT_URL="$OMNI_URL" OMNISIGHT_TOKEN="$OMNI_TOKEN" OMNISIGHT_AGENT_ROLE="$OMNI_ROLE" bash; then
+                            success "✅ Omnisight Agent erfolgreich installiert und gestartet!"
+                            log_action "OMNISIGHT" "Omnisight Agent installed successfully"
+                        else
+                            error "Omnisight Agent Installation fehlgeschlagen."
+                            log_action "OMNISIGHT" "Omnisight Agent installation failed"
+                        fi
                         break
                         ;;
                     "Fertig")
