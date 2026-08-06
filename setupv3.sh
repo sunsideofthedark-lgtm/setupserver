@@ -2026,18 +2026,18 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
             fi
             
             # Standardbenutzer hinzufügen
-            local group_users=("root" "$NEW_USER")
+            group_users=("root" "$NEW_USER")
             if [[ "$DBBACKUP_CREATED" == "1" ]] || id "dbbackup" &>/dev/null; then
                 group_users+=("dbbackup")
             fi
             
             # Weitere Benutzer abfragen
             # Liste aller Systembenutzer mit UID >= 1000 ermitteln (ohne nobody)
-            local system_users=($(awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd))
+            system_users=($(awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd))
             # Bereits ausgewählte Benutzer ausschließen
-            local available_users=()
+            available_users=()
             for u in "${system_users[@]}"; do
-                local skip=0
+                skip=0
                 for su in "${group_users[@]}"; do
                     if [[ "$u" == "$su" ]]; then
                         skip=1
