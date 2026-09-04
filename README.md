@@ -73,6 +73,7 @@ Diese Pakete werden automatisch installiert, wenn das Modul "Optionale Software"
 | Systemaktualisierung | Pakete aktualisieren, Autoremove |
 | Automatische Updates | Unattended-Upgrades konfigurieren |
 | Hostname | Server-Name ändern |
+| Zeitzone | System-Zeitzone & NTP-Zeitsynchronisation konfigurieren |
 | Benutzerverwaltung | Neuen sudo-User + SSH-Schlüssel |
 | SSH-Härtung | Port ändern, Root deaktivieren |
 | Firewall | UFW/firewalld konfigurieren |

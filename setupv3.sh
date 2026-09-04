@@ -767,6 +767,11 @@ check_module_status() {
                 echo "not-started"
             fi
             ;;
+
+        "timezone")
+            # Zeitzonen-Status immer als bereit/überprüfbar markieren
+            echo "completed"
+            ;;
             
         "user_management")
             # Prüfe ob ein nicht-root User existiert mit sudo-Rechten
@@ -1144,6 +1149,7 @@ declare -A SETUP_MODULES
 SETUP_MODULES["system_update"]="Systemaktualisierung"
 SETUP_MODULES["auto_updates"]="Automatische Updates"
 SETUP_MODULES["hostname"]="Hostname konfigurieren"
+SETUP_MODULES["timezone"]="Zeitzone konfigurieren"
 SETUP_MODULES["user_management"]="Benutzerverwaltung"
 SETUP_MODULES["ssh_hardening"]="SSH-Härtung"
 SETUP_MODULES["firewall"]="Firewall-Konfiguration"
@@ -1166,7 +1172,7 @@ show_setup_menu() {
     local counter=1
     local module_keys=()
     
-    for key in system_update auto_updates hostname user_management ssh_hardening firewall optional_software system_maintenance root_security; do
+    for key in system_update auto_updates hostname timezone user_management ssh_hardening firewall optional_software system_maintenance root_security; do
         module_keys+=("$key")
         local selection_status=""
         local module_display=""
@@ -1200,7 +1206,7 @@ show_setup_menu() {
 }
 
 select_modules() {
-    local module_keys=(system_update auto_updates hostname user_management ssh_hardening firewall optional_software system_maintenance root_security)
+    local module_keys=(system_update auto_updates hostname timezone user_management ssh_hardening firewall optional_software system_maintenance root_security)
     
     while true; do
         show_setup_menu
@@ -1208,7 +1214,7 @@ select_modules() {
         debug "Modulauswahl: '$choice'"
         
         case "$choice" in
-            [1-9])
+            [1-9]|10)
                 local key="${module_keys[$((choice-1))]}"
                 if [[ "${SELECTED_MODULES[$key]}" == "1" ]]; then
                     SELECTED_MODULES[$key]="0"
@@ -1223,7 +1229,7 @@ select_modules() {
                 # Mehrere Module gleichzeitig auswählen
                 IFS=',' read -ra NUMS <<< "$choice"
                 for num in "${NUMS[@]}"; do
-                    if [[ "$num" =~ ^[1-9]$ ]]; then
+                    if [[ "$num" =~ ^([1-9]|10)$ ]]; then
                         local key="${module_keys[$((num-1))]}"
                         SELECTED_MODULES[$key]="1"
                         info "Modul '${SETUP_MODULES[$key]}' ausgewählt"
@@ -1345,7 +1351,7 @@ case "$setup_choice" in
     1)
         info "Komplettes Setup wird ausgeführt..."
         # Alle Module aktivieren
-        for key in system_update auto_updates hostname user_management ssh_hardening firewall optional_software system_maintenance root_security; do
+        for key in system_update auto_updates hostname timezone user_management ssh_hardening firewall optional_software system_maintenance root_security; do
             SELECTED_MODULES[$key]="1"
         done
         ;;
@@ -1360,7 +1366,7 @@ case "$setup_choice" in
     *)
         error "Ungültige Auswahl. Führe komplettes Setup aus..."
         # Standard: Alle Module aktivieren
-        for key in system_update auto_updates hostname user_management ssh_hardening firewall optional_software system_maintenance root_security; do
+        for key in system_update auto_updates hostname timezone user_management ssh_hardening firewall optional_software system_maintenance root_security; do
             SELECTED_MODULES[$key]="1"
         done
         ;;
@@ -1369,7 +1375,7 @@ esac
 # Modulstatus anzeigen
 echo ""
 echo -e "${C_CYAN}📋 Ausgewählte Module für dieses Setup:${C_RESET}"
-for key in system_update auto_updates hostname user_management ssh_hardening firewall optional_software system_maintenance root_security; do
+for key in system_update auto_updates hostname timezone user_management ssh_hardening firewall optional_software system_maintenance root_security; do
     if [[ "${SELECTED_MODULES[$key]}" == "1" ]]; then
         echo -e "     ${C_GREEN}✓${C_RESET} ${SETUP_MODULES[$key]}"
     else
@@ -1550,10 +1556,82 @@ else
 fi
 echo ""
 
-# --- 4. Benutzerverwaltung ---
+# --- 4. Zeitzone konfigurieren ---
+
+if [[ "${SELECTED_MODULES[timezone]}" == "1" ]]; then
+    info "Schritt 4: Zeitzone konfigurieren"
+    
+    current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "Unbekannt")
+    current_time=$(date "+%Y-%m-%d %H:%M:%S %Z")
+    
+    info "Aktuelle Zeitzone: $current_tz"
+    info "Aktuelle Systemzeit: $current_time"
+    
+    if confirm "Möchten Sie die Zeitzone des Servers ändern?"; then
+        echo ""
+        echo -e "${C_CYAN}Wählen Sie eine Zeitzone aus:${C_RESET}"
+        echo "1. Europe/Berlin (Deutschland, Österreich, Schweiz / CET/CEST)"
+        echo "2. UTC (Koordinierte Weltzeit)"
+        echo "3. Europe/Vienna (Wien)"
+        echo "4. Europe/Zurich (Zürich)"
+        echo "5. America/New_York (US Eastern Time)"
+        echo "6. Eigene Zeitzone eingeben"
+        echo ""
+        read -p "Ihre Wahl [1-6]: " tz_choice
+        
+        target_tz=""
+        case "$tz_choice" in
+            1) target_tz="Europe/Berlin" ;;
+            2) target_tz="UTC" ;;
+            3) target_tz="Europe/Vienna" ;;
+            4) target_tz="Europe/Zurich" ;;
+            5) target_tz="America/New_York" ;;
+            6)
+                read -p "Bitte geben Sie die Zeitzone ein (z.B. Europe/Amsterdam): " custom_tz
+                if [ -n "$custom_tz" ]; then
+                    if command -v timedatectl >/dev/null 2>&1 && timedatectl list-timezones | grep -qx "$custom_tz"; then
+                        target_tz="$custom_tz"
+                    elif [ -f "/usr/share/zoneinfo/$custom_tz" ]; then
+                        target_tz="$custom_tz"
+                    else
+                        error "Ungültige Zeitzone: '$custom_tz'"
+                    fi
+                fi
+                ;;
+            *)
+                warning "Ungültige Auswahl."
+                ;;
+        esac
+        
+        if [ -n "$target_tz" ]; then
+            info "Setze Zeitzone auf '$target_tz'..."
+            if command -v timedatectl >/dev/null 2>&1; then
+                timedatectl set-timezone "$target_tz"
+                timedatectl set-ntp true 2>/dev/null || true
+            else
+                ln -sf "/usr/share/zoneinfo/$target_tz" /etc/localtime
+                echo "$target_tz" > /etc/timezone
+            fi
+            
+            new_time=$(date "+%Y-%m-%d %H:%M:%S %Z")
+            success "Zeitzone erfolgreich auf '$target_tz' gesetzt."
+            info "Neue Systemzeit: $new_time"
+            log_action "TIMEZONE" "Zeitzone geändert auf $target_tz"
+        else
+            warning "Zeitzone wurde nicht geändert."
+        fi
+    else
+        warning "Zeitzonen-Konfiguration übersprungen."
+    fi
+else
+    info "⏭️  Zeitzonen-Konfiguration übersprungen (Modul nicht ausgewählt)"
+fi
+echo ""
+
+# --- 5. Benutzerverwaltung ---
 
 if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
-    info "Schritt 4: Neuen administrativen Benutzer anlegen"
+    info "Schritt 5: Neuen administrativen Benutzer anlegen"
     if confirm "Soll ein neuer Benutzer mit sudo-Rechten angelegt werden?"; then
         while true; do
             read -p "Bitte geben Sie den Benutzernamen für den neuen Benutzer ein: " NEW_USER
