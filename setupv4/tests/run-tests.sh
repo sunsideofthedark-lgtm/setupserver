@@ -65,8 +65,13 @@ for test_file in "${test_files[@]}"; do
     rc=$?
     echo "$output"
 
-    # Die Zähler stehen in der Zusammenfassung der einzelnen Testdatei
+    # Die Zähler stehen in der Zusammenfassung der einzelnen Testdatei.
+    # Es gibt zwei Formate: "ALLE TESTS BESTANDEN (N)" und
+    # "N FEHLGESCHLAGEN, M bestanden".
     p=$(echo "$output" | grep -oE 'BESTANDEN  \([0-9]+\)' | grep -oE '[0-9]+' | tail -n1)
+    if [ -z "$p" ]; then
+        p=$(echo "$output" | grep -oE 'FEHLGESCHLAGEN, [0-9]+ bestanden' | grep -oE '[0-9]+' | head -n1)
+    fi
     f=$(echo "$output" | grep -oE '[0-9]+ FEHLGESCHLAGEN' | grep -oE '^[0-9]+' | tail -n1)
     [ -z "$p" ] && p=0
     [ -z "$f" ] && f=0

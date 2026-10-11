@@ -1,0 +1,15 @@
+# shellcheck-Konfiguration für dieses Repository
+#
+# Wird bei jedem Aufruf von shellcheck automatisch gelesen (auch in der CI).
+
+# SC2034: In den Modulen werden MODULE_ID, MODULE_NAME, MODULE_DESC,
+# MODULE_ORDER, MODULE_REQUIRED_KEYS und MODULE_TAGS als Metadaten gesetzt.
+# Gelesen werden sie vom Loader in lib/modules.sh - also aus einer anderen
+# Datei. Ohne diese Ausnahme meldet shellcheck jeden einzelnen Metadatenblock
+# als "unbenutzte Variable" (171 von 188 Befunden).
+disable=SC2034
+
+# SC1091/SC1090: Die Bibliotheken werden zur Laufzeit über einen Pfad geladen,
+# den shellcheck statisch nicht auflösen kann.
+disable=SC1091
+disable=SC1090

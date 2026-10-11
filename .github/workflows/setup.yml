@@ -26,12 +26,29 @@ jobs:
           find setupv4 -name '*.sh' -print0 | xargs -0 -n1 bash -n
           bash -n setup-zot-mirrors.sh
 
-      - name: shellcheck (Fehler-Ebene)
-        # Nur echte Fehler blockieren. Warnungen (SC2086 usw.) sind in
-        # Bash-Skripten mit bewussten Wortzerlegungen häufig.
+      - name: shellcheck (blockiert bei Fehlern)
+        # Fehler-Ebene blockiert den Build. Die Ausnahmen SC2034 (Modul-Metadaten
+        # werden vom Loader aus einer anderen Datei gelesen) und SC1091/SC1090
+        # (Laufzeit-Library-Pfade) stehen in .shellcheckrc.
+        # Warnungen (SC2086 u. ae.) werden nur berichtet, nicht blockiert - sie
+        # zu unterdruecken waere schlechter als sie sichtbar zu machen.
         run: |
-          find setupv4 -name '*.sh' -print0 \
-            | xargs -0 shellcheck -S error -e SC1091,SC1090 || true
+          set -o pipefail
+          mapfile -t FILES < <(find setupv4 -name '*.sh' -type f)
+          FILES+=(setupv3.sh setup-zot-mirrors.sh)
+          shellcheck -S error -f gcc "${FILES[@]}"
+
+      - name: shellcheck (Warnungen, nur Bericht)
+        if: always()
+        run: |
+          mapfile -t FILES < <(find setupv4 -name '*.sh' -type f)
+          FILES+=(setupv3.sh setup-zot-mirrors.sh)
+          shellcheck -S warning -f gcc "${FILES[@]}" > warnings.txt 2>&1 || true
+          echo "### shellcheck-Warnungen" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          sed 's|^| |' warnings.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Warnungen gesamt: $(wc -l < warnings.txt)"
 
       - name: Testsuite
         # Die Tests laufen in einer Kopie unter $TMPDIR und fassen weder das

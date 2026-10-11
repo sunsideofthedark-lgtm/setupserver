@@ -44,6 +44,26 @@ assert_exit 0 "$EXIT_CODE" "--list liefert Exit 0"
 assert_contains "$OUTPUT" "system-update" "--list zeigt system-update"
 assert_contains "$OUTPUT" "verify" "--list zeigt verify"
 
+section "3b. --audit"
+cat > "$SANDBOX_DIR/audit.conf" << 'EOF'
+SERVER_HOSTNAME="su-test"
+TIMEZONE="Europe/Vienna"
+ADMIN_USER="sugo"
+SSH_PORT=2222
+MODULES=(hostname timezone users sftp-sudoers)
+EOF
+run_setup --config audit.conf --audit --non-interactive
+# Der Audit darf Exit 1 liefern, wenn er Abweichungen findet - beides ist ok
+assert_ne 2 "$EXIT_CODE" "--audit stürzt nicht ab"
+assert_contains "$OUTPUT" "Audit: Ist-Zustand" "--audit hat eine Ausgabe"
+assert_contains "$OUTPUT" "Im Zielzustand:" "--audit zählt Abweichungen"
+
+# Jede Tabellenzeile muss mit einer Modul-ID beginnen. Freitext zwischen den
+# Zeilen würde die Tabelle zerreißen (module_audit darf nur EINE Zeile
+# auf stdout schreiben, weil show_audit sie per $( ) einfangt).
+stray=$(echo "$OUTPUT" | grep -E '^  [a-z0-9-]+ ' | grep -cvE '^(  (hostname|timezone|users|sftp-sudoers) )')
+assert_eq "0" "$stray" "Keine Fremdzeilen in der Audit-Tabelle"
+
 section "4. Selbstinstallation nach SETUP_HOME"
 # setup.sh muss von jedem Startort aus nach $SETUP_HOME umziehen und dort
 # weiterlaufen - inklusive der übergebenen Argumente (deshalb funktioniert
@@ -59,6 +79,28 @@ if [ -f "$SANDBOX_HOME/logs/setup.log" ]; then
     assert_eq "600" "$mode" "Logfile hat Modus 600"
 else
     fail "Kein Logfile unter SETUP_HOME/logs/"
+fi
+
+# Ein leeres SETUP_HOME faellt auf den Standard /opt/serversetup zurueck
+# ("${SETUP_HOME:-...}") - das ist sicher. Ein auf "/" gesetztes SETUP_HOME
+# wuerde dagegen beim Umziehen "rm -rf /lib" ausloesen und muss abgewiesen werden.
+empty_out=$(cd "$SANDBOX_DIR" && SETUP_HOME="" bash ./setup.sh --list 2>&1)
+if [ $? -eq 0 ] && echo "$empty_out" | grep -q "/opt/serversetup\|Verfügbare Module"; then
+    pass "Leeres SETUP_HOME fällt auf den Standard zurück"
+else
+    fail "Leeres SETUP_HOME wird nicht sauber behandelt"
+fi
+
+if (cd "$SANDBOX_DIR" && SETUP_HOME="/" bash ./setup.sh --list >/dev/null 2>&1); then
+    fail "SETUP_HOME=/ wurde nicht abgewiesen"
+else
+    pass "SETUP_HOME=/ wird abgewiesen"
+fi
+
+if (cd "$SANDBOX_DIR" && SETUP_HOME=/etc bash ./setup.sh --list >/dev/null 2>&1); then
+    fail "SETUP_HOME=/etc wurde nicht abgewiesen"
+else
+    pass "SETUP_HOME=/etc wird abgewiesen"
 fi
 if [ -d "$SANDBOX_HOME/lib" ] && [ -d "$SANDBOX_HOME/modules" ]; then
     pass "Bibliotheken und Module liegen in SETUP_HOME"
