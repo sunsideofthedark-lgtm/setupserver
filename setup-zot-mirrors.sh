@@ -55,7 +55,16 @@ C_CYAN='\033[36m'
 
 DEBUG=${DEBUG:-0}
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-LOGFILE="$SCRIPT_DIR/zot-mirrors.log"
+
+# Logablage: bevorzugt unter dem festen Setup-Verzeichnis, damit Logs nicht
+# davon abhaengen, von wo das Skript gestartet wurde. Ohne dieses Verzeichnis
+# (etwa vor der ersten Ausfuehrung von setupv4) wird neben dem Skript geloggt.
+SETUP_HOME="${SETUP_HOME:-/opt/serversetup}"
+if mkdir -p "$SETUP_HOME/logs" 2>/dev/null && [ -w "$SETUP_HOME/logs" ]; then
+  LOGFILE="$SETUP_HOME/logs/zot-mirrors.log"
+else
+  LOGFILE="$SCRIPT_DIR/zot-mirrors.log"
+fi
 
 # --- Ausgabe- und Logging-Funktionen ---
 
