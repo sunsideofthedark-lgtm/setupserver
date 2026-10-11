@@ -1,11 +1,20 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.7.0)
+# Universelles Server-Setup-Skript für Linux-Distributionen (Version 3.8.0)
 # ==============================================================================
 # Dieses Skript führt den Administrator durch die grundlegenden Schritte zur
 # Absicherung eines neuen Servers. Jeder kritischer Schritt erfordert eine
 # explizite Bestätigung.
+#
+# Hinzugefügte Features v3.8 (SFTP-Sudoers-Regel & Zot-Registry-Mirrors):
+# - NEU: NOPASSWD-Regel 'NOPASSWD: <sftp-server>' für den erstellten Benutzer
+# - NEU: Regel pro Benutzer in eigener sudoers.d-Datei
+# - NEU: Automatische Pfad-Erkennung des SFTP-Servers (Debian/Ubuntu, RHEL/Fedora, SUSE)
+# - NEU: Benutzername-Validierung vor dem Schreiben in /etc/sudoers.d (verhindert Sudoers-Injection)
+# - NEU: visudo -c Syntaxprüfung inkl. automatischem Rollback bei Syntaxfehler
+# - NEU: Zot-Registry-Mirrors für Docker (hosts.toml + docker login), optional in Schritt 7
+# - NEU: containerd Image Store wird geprüft und bei Bedarf aktiviert (Voraussetzung für hosts.toml)
 #
 # Hinzugefügte Features v3.7 (Sudoers Fix, NetBird & CrowdSec Integration):
 # - FIX: Sudoers logfile & log_input/log_output Optionen deaktiviert (Kompatibilität mit sudo-rs)
@@ -384,6 +393,330 @@ validate_passkey() {
         return 1
     fi
 
+    return 0
+}
+
+# ==============================================================================
+# ZOT-REGISTRY-MIRRORS (v3.8)
+# ==============================================================================
+# Leitet Docker-Pulls so um, dass sie zuerst über die eigene Zot-Instanz laufen
+# und bei deren Ausfall auf das jeweilige Original-Registry zurückfallen.
+#
+# WICHTIG: Docker wertet die hosts.toml-Dateien NUR mit dem containerd Image Store
+# aus ("features": {"containerd-snapshotter": true} in daemon.json). Ohne ihn
+# bleibt die gesamte Konfiguration wirkungslos.
+
+ZOT_DEFAULT_ENDPOINT="https://zot.sunriseing.dev"
+ZOT_DEFAULT_USER="admin"
+ZOT_CERTS_DIR="/etc/docker/certs.d"
+
+# Registry-Mappings: domain|upstream-server|zot-prefix
+ZOT_REGISTRIES=(
+    "docker.io|https://registry-1.docker.io|docker-images"
+    "ghcr.io|https://ghcr.io|ghcr"
+    "quay.io|https://quay.io|quay"
+    "mcr.microsoft.com|https://mcr.microsoft.com|mcr"
+    "registry.k8s.io|https://registry.k8s.io|k8s"
+    "gcr.io|https://gcr.io|gcr"
+    "public.ecr.aws|https://public.ecr.aws|ecr"
+)
+
+# Entfernt führende/abschließende Schrägstriche. Das http(s)://-Schema bleibt
+# erhalten, da es in der hosts.toml zwingend benötigt wird.
+zot_normalize_endpoint() {
+    local url="$1"
+    url="${url#/}"
+    url="${url%/}"
+    echo "$url"
+}
+
+# Entfernt das http(s):// für Aufrufe, die nur den Hostnamen erwarten
+zot_strip_scheme() {
+    local url="$1"
+    url="${url#http://}"
+    url="${url#https://}"
+    echo "$url"
+}
+
+zot_validate_endpoint() {
+    local url="$1"
+    [[ "$url" =~ ^https?:// ]] || return 1
+    local host
+    host="$(zot_strip_scheme "$url")"
+    host="${host%%/*}"
+    host="${host%%:*}"
+    [[ "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] || return 1
+    return 0
+}
+
+zot_validate_domain() {
+    local domain="$1"
+    [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] || return 1
+    return 0
+}
+
+zot_containerd_store_active() {
+    local driver_status
+    driver_status=$(docker info -f '{{ .DriverStatus }}' 2>/dev/null || true)
+    debug "Docker DriverStatus: $driver_status"
+    [[ "$driver_status" == *"io.containerd.snapshotter.v1"* ]]
+}
+
+# Aktiviert den containerd Image Store, ohne bestehende Einstellungen zu verlieren
+zot_enable_containerd_store() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        warning "python3 ist nicht installiert - daemon.json wird nicht automatisch geändert."
+        echo "     Bitte von Hand in '/etc/docker/daemon.json' ergänzen:"
+        echo '     { "features": { "containerd-snapshotter": true } }'
+        echo "     Danach: systemctl restart docker"
+        return 1
+    fi
+
+    info "Aktiviere containerd Image Store in '/etc/docker/daemon.json' ..."
+    if python3 - /etc/docker/daemon.json << 'ZOTPYEOF'
+import json, os, shutil, sys
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        data = json.load(f)
+except FileNotFoundError:
+    data = {}
+except json.JSONDecodeError as e:
+    print(f"FEHLER: {path} enthaelt kein gueltiges JSON: {e}")
+    sys.exit(1)
+
+if not isinstance(data, dict):
+    print("FEHLER: unerwarteter Aufbau in daemon.json")
+    sys.exit(1)
+
+features = data.get("features")
+if not isinstance(features, dict):
+    features = {}
+features["containerd-snapshotter"] = True
+data["features"] = features
+
+tmp = path + ".zot-tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.chmod(tmp, 0o644)
+shutil.move(tmp, path)
+ZOTPYEOF
+    then
+        success "daemon.json aktualisiert (bestehende Einstellungen erhalten)."
+        return 0
+    fi
+
+    error "Aktualisierung von '/etc/docker/daemon.json' fehlgeschlagen."
+    return 1
+}
+
+# Interaktive Einrichtung der Zot-Registry-Mirrors
+configure_zot_mirrors() {
+    local endpoint="" input="" hostname="" username="" api_key="" confirm_key=""
+    local item domain upstream prefix target_dir target_file do_login=0
+
+    # --- containerd Image Store prüfen (Voraussetzung) ---
+    echo ""
+    info "Prüfe containerd Image Store..."
+    if zot_containerd_store_active; then
+        success "containerd Image Store ist aktiv - hosts.toml wird ausgewertet."
+    else
+        warning "containerd Image Store ist NICHT aktiv."
+        warning "Ohne ihn ignoriert Docker die hosts.toml-Dateien komplett."
+        if ! ask_yes_no "Soll der containerd Image Store jetzt aktiviert werden? (erfordert Docker-Neustart)" "y"; then
+            skip "Zot-Mirrors werden übersprungen."
+            return 0
+        fi
+        if ! zot_enable_containerd_store; then
+            return 1
+        fi
+        warning "Docker muss neu gestartet werden - laufende Container werden dabei unterbrochen."
+        if ! ask_yes_no "Docker jetzt neu starten?" "y"; then
+            warning "Docker wurde nicht neu gestartet."
+            echo "     Ohne Neustart bleibt die Mirror-Konfiguration ohne Wirkung."
+            return 1
+        fi
+        systemctl restart docker
+        sleep 3
+        if ! zot_containerd_store_active; then
+            error "containerd Image Store ist nach dem Neustart nicht aktiv."
+            return 1
+        fi
+        success "containerd Image Store ist jetzt aktiv."
+    fi
+
+    # --- Zielwerte bestimmen ---
+    endpoint="$ZOT_DEFAULT_ENDPOINT"
+    while true; do
+        echo -e "${C_CYAN}Zot-Endpoint [${C_RESET}${ZOT_DEFAULT_ENDPOINT}${C_CYAN}]:${C_RESET}" >&2
+        read -r input || input=""
+        [ -z "$input" ] && input="$ZOT_DEFAULT_ENDPOINT"
+        if zot_validate_endpoint "$input"; then
+            endpoint="$(zot_normalize_endpoint "$input")"
+            break
+        fi
+        warning "Ungültige URL - erwartet wird z. B. $ZOT_DEFAULT_ENDPOINT"
+    done
+    hostname="$(zot_strip_scheme "$endpoint")"
+    success "Zot-Endpoint: $endpoint"
+
+    echo -e "${C_CYAN}Zot-Benutzername [${C_RESET}${ZOT_DEFAULT_USER}${C_CYAN}]:${C_RESET}" >&2
+    read -r input || input=""
+    [ -z "$input" ] && input="$ZOT_DEFAULT_USER"
+    username="$input"
+    success "Zot-Benutzername: $username"
+
+    # API-Key verdeckt abfragen (nie in History, nie im Log)
+    while true; do
+        echo -e "${C_CYAN}Zot-API-Key (Eingabe bleibt verborgen): ${C_RESET}" >&2
+        api_key=""
+        read -rs api_key || api_key=""
+        echo "" >&2
+        if [ -z "$api_key" ]; then
+            warning "Der API-Key darf nicht leer sein."
+            continue
+        fi
+        echo -e "${C_CYAN}Zot-API-Key wiederholen: ${C_RESET}" >&2
+        confirm_key=""
+        read -rs confirm_key || confirm_key=""
+        echo "" >&2
+        if [ "$api_key" != "$confirm_key" ]; then
+            warning "Die Eingaben stimmen nicht überein. Bitte erneut versuchen."
+            continue
+        fi
+        break
+    done
+    unset confirm_key
+    debug "API-Key empfangen: $(mask_secret "$api_key")"
+
+    if ask_yes_no "Mit 'docker login' bei $hostname anmelden?" "y"; then
+        do_login=1
+    else
+        warning "docker login wird übersprungen - Anmeldung muss später manuell erfolgen."
+    fi
+
+    # --- hosts.toml-Dateien schreiben ---
+    echo ""
+    info "Erstelle hosts.toml für ${#ZOT_REGISTRIES[@]} Registries..."
+
+    for item in "${ZOT_REGISTRIES[@]}"; do
+        IFS="|" read -r domain upstream prefix <<< "$item"
+
+        if ! zot_validate_domain "$domain"; then
+            error "Ungültiger Registry-Domain: '$domain' - wird übersprungen."
+            continue
+        fi
+        if [ -z "$upstream" ] || [ -z "$prefix" ]; then
+            error "Unvollständiger Registry-Eintrag: '$item' - wird übersprungen."
+            continue
+        fi
+
+        target_dir="${ZOT_CERTS_DIR}/${domain}"
+        target_file="${target_dir}/hosts.toml"
+        mkdir -p "$target_dir"
+
+        cat > "$target_file" << EOFZOT
+server = "${upstream}"
+
+[host."${endpoint}/v2/${prefix}"]
+  capabilities = ["pull", "resolve"]
+  override_path = true
+EOFZOT
+        chmod 644 "$target_file"
+        debug "hosts.toml geschrieben: $target_file"
+        success "  ${domain} → ${endpoint}/v2/${prefix} (Fallback: ${upstream})"
+    done
+
+    # --- docker login ---
+    if [ "$do_login" = "1" ]; then
+        echo ""
+        info "Melde '$hostname' als '$username' an..."
+        # Docker kann keine Browser-Weiterleitung für OpenID Connect - Zot
+        # akzeptiert API-Tokens deshalb direkt via HTTP Basic Authentication.
+        # --password-stdin hält den Key aus Bash-History und Prozessliste heraus.
+        if printf '%s' "$api_key" | docker login "$hostname" -u "$username" --password-stdin; then
+            success "docker login erfolgreich."
+        else
+            error "docker login fehlgeschlagen - Benutzername und API-Key prüfen."
+        fi
+    fi
+
+    unset api_key
+
+    echo ""
+    success "Zot-Registry-Mirrors eingerichtet."
+    info "Verifikation: docker pull ghcr.io/linuxserver/nginx:latest"
+    return 0
+}
+
+# Erlaubt einem Benutzer den passwortfreien Aufruf des SFTP-Servers.
+# Benötigt wird das u.a. von SFTP-GUI-Clients (WinSCP, Cyberduck, ...), die
+# intern ein 'sudo' vor dem sftp-server vorschalten.
+#
+# SICHERHEIT: Wer den SSH-Key dieses Benutzers besitzt, kann damit per SFTP
+# alle Dateien des Servers als root lesen, schreiben und löschen.
+configure_sftp_sudoers() {
+    local user="$1"
+    # Dateiname pro Benutzer, damit mehrere Benutzer parallel je eine Regel
+    # erhalten und sich nicht gegenseitig überschreiben ($ wird entfernt)
+    local sudoers_file="/etc/sudoers.d/92-sftp-nopasswd-${user//[$]/}"
+    local sftp_path="" candidate
+
+    # Benutzername validieren - verhindert Sudoers-Injection über ungültige Namen
+    if [[ ! "$user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
+        error "Ungültiger Benutzername für SFTP-Sudoers-Regel: '$user'"
+        return 1
+    fi
+
+    # SFTP-Server-Pfad ermitteln: bevorst aus der laufenden sshd-Konfiguration,
+    # ansonsten über die distributionsüblichen Pfade
+    sftp_path=$(sshd -T 2>/dev/null | awk '/^subsystem/ {print $3; exit}')
+    if [ -z "$sftp_path" ] || [ ! -x "$sftp_path" ]; then
+        for candidate in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server /usr/lib/ssh/sftp-server; do
+            if [ -x "$candidate" ]; then
+                sftp_path="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$sftp_path" ]; then
+        warning "SFTP-Server-Binary nicht gefunden - Sudoers-Regel wird übersprungen."
+        return 0
+    fi
+
+    if [ ! -d /etc/sudoers.d ]; then
+        warning "/etc/sudoers.d nicht vorhanden - Sudoers-Regel wird übersprungen."
+        return 0
+    fi
+
+    # Regel schreiben: exaktes Binary, KEIN Pfad-Wildcard
+    cat > "$sudoers_file" << EOF
+# Erlaubt '$user' den passwortfreien Zugriff auf den SFTP-Server (SFTP-GUI-Clients)
+$user ALL=(ALL) NOPASSWD: $sftp_path
+EOF
+    chmod 0440 "$sudoers_file"
+    chown root:root "$sudoers_file"
+    debug "SFTP-Sudoers-Regel geschrieben: $sudoers_file -> $user ALL=(ALL) NOPASSWD: $sftp_path"
+
+    # Prüfen, ob die Regel wirklich geschrieben wurde (sonst könnte eine
+    # veraltete Datei als Erfolg durchgehen)
+    if ! grep -qF "$user ALL=(ALL) NOPASSWD: $sftp_path" "$sudoers_file" 2>/dev/null; then
+        error "Sudoers-Regel konnte nicht geschrieben werden - Datei wird entfernt."
+        rm -f "$sudoers_file"
+        return 1
+    fi
+
+    # Syntax & Berechtigungen prüfen, bei Fehler sofort zurückrollen
+    if command -v visudo >/dev/null 2>&1 && ! visudo -c -f "$sudoers_file" >/dev/null 2>&1; then
+        error "Sudoers-Syntaxprüfung fehlgeschlagen - Regel wird entfernt."
+        rm -f "$sudoers_file"
+        return 1
+    fi
+
+    success "✅ SFTP-Sudoers-Regel für '$user' gesetzt ($sftp_path)"
     return 0
 }
 
@@ -1949,6 +2282,9 @@ if [[ "${SELECTED_MODULES[user_management]}" == "1" ]]; then
             echo "     • ~/backups/  - Für lokale Backups"
             echo "     • /srv/       - Direkt beschreibbar für Projekte (ohne sudo)"
             echo "     • /opt/       - Direkt beschreibbar für Anwendungen & Software (ohne sudo)"
+
+            # SFTP-Sudoers-Regel für den neuen Benutzer (NOPASSWD für den sftp-server)
+            configure_sftp_sudoers "$NEW_USER"
         fi
     else
         warning "Erstellung eines neuen Benutzers übersprungen."
@@ -2508,6 +2844,16 @@ EOF
             error "Docker-Installation fehlgeschlagen"
             log_action "DOCKER" "Docker installation failed"
         fi
+    fi
+
+    # === ZOT-REGISTRY-MIRRORS (v3.8) ===
+    echo ""
+    if ! command -v docker >/dev/null 2>&1; then
+        info "⏭️  Zot-Registry-Mirrors übersprungen (Docker nicht installiert)"
+    elif ask_yes_no "Sollen Docker-Pulls über eine Zot-Registry (Mirrors) geleitet werden?" "n"; then
+        configure_zot_mirrors
+    else
+        info "⏭️  Zot-Registry-Mirrors übersprungen"
     fi
 
     # === ZFS CACHE KONFIGURATION ===
