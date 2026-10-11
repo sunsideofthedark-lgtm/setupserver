@@ -1444,7 +1444,7 @@ detect_os
 if [ "$DEBUG" = "1" ]; then
     debug "Debug-Modus aktiviert"
     debug "Skript-Pfad: $0"
-    debug "Argumente: $@"
+    debug "Argumente: $*"
     debug "Aktueller Benutzer: $(whoami)"
     debug "Aktuelle Zeit: $(date)"
     debug "Erkanntes OS: $OS_NAME"
