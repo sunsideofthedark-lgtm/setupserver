@@ -2,6 +2,29 @@
 
 Ein universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Linux-Servern.
 
+## Zwei Systeme im Repo
+
+| | Verzeichnis | Einsatz |
+|---|---|---|
+| **v4 (modular)** | `setupv4/` | Neuerstand. Haupt-Script + 26 Module, Konfiguration per Datei, `--dry-run`, Selbstinstallation nach `/opt/serversetup`, Testsuite + CI |
+| **v3 (monolith)** | `setupv3.sh` | Bestehendes System, läuft weiter |
+
+Für neue Deployments wird `setupv4` empfohlen — Details in [`setupv4/README.md`](setupv4/README.md).
+
+```bash
+git clone https://github.com/sunsideofthedark-lgtm/setupserver.git
+cd setupserver/setupv4
+sudo bash setup.sh --init                  # Beispielkonfiguration erzeugen
+sudo bash setup.sh --config config/setup.conf
+```
+
+Danach liegt alles fest unter `/opt/serversetup`, unabhängig davon, von wo
+das Script gestartet wurde:
+
+```bash
+sudo /opt/serversetup/setup.sh --status
+```
+
 ## One-Liner (Kopieren & Ausführen)
 
 **Ubuntu / Debian:**
@@ -369,6 +392,7 @@ tailscale up --force-reauth
 
 | Version | Änderungen |
 |---------|------------|
+| 3.8.0 | SFTP-Sudoers-Regel, Zot-Registry-Mirrors (in v3 und v4), neues modulares System `setupv4` mit 26 Modulen, Config-Dateien, Testsuite und CI |
 | 3.7.0 | Sudoers Fix (sudo-rs), NetBird VPN (Self-Hosted), CrowdSec + Docker Collection |
 | 3.6.0 | Pangolin SPK Provisioning für automatische Site-Erstellung |
 | 3.5.0 | GitHub SSH-Key Setup mit GitHub CLI (gh) Unterstützung |
