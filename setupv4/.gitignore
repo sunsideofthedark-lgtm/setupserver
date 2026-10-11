@@ -1,0 +1,13 @@
+# Runtime-Artefakte
+install.log
+logs/
+*.log
+*.log.1
+
+# Echte Konfigurationen koennen unter Umstaenden Secrets enthalten und
+# gehoeren nicht ins Repository. Die Vorlage setup.conf.example ist versioniert.
+config/setup.conf
+config/servers/*.conf
+
+# Von --dry-run und Tests erzeugte Backups
+/var/backups/serversetup/
