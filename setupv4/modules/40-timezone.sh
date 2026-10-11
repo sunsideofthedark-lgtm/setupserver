@@ -168,3 +168,39 @@ module_status() {
         echo "$current (NTP: $ntp)"
     fi
 }
+
+# Ziel: Zeitzone aus der Config gesetzt UND NTP-Synchronisation aktiv.
+# Beide Teilziele stehen im nächsten Feld, die Abweichung im Detail - so
+# bleibt es bei genau einer Zeile.
+module_audit() {
+    local current target ntp
+
+    current="$(timezone_current)"
+    [ -n "$current" ] || current="Unbekannt"
+    target="$(config_get TIMEZONE "")"
+    ntp="$(timedatectl show --property=NTP --value 2>/dev/null)"
+    [ -n "$ntp" ] || ntp="unbekannt"
+
+    if [ -z "$target" ]; then
+        echo "info|aktuell: $current|Keine Ziel-Zeitzone in der Config"
+        return 0
+    fi
+
+    if [ "$current" != "$target" ]; then
+        echo "abweichung|aktuell: $current (NTP: $ntp)|Zeitzone $target und NTP aktiv"
+        return 0
+    fi
+
+    case "$ntp" in
+        yes)
+            echo "ok|Zeitzone $target, NTP aktiv"
+            ;;
+        unbekannt)
+            echo "info|Zeitzone $target, NTP-Status nicht ermittelbar"
+            ;;
+        *)
+            echo "abweichung|NTP-Synchronisation ist aus|Zeitzone $target und NTP aktiv"
+            ;;
+    esac
+    return 0
+}

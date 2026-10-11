@@ -140,3 +140,33 @@ module_status() {
 
     echo "installiert, ${collections} CrowdSec-Collections"
 }
+
+# Ziel: CrowdSec ist installiert, ein Firewall-Bouncer ist registriert und
+# mindestens eine Collection ist vorhanden - ohne Bouncer blockiert die Engine
+# nichts, ohne Collections gibt es keine Erkennungsregeln.
+module_audit() {
+    local bouncers collections missing=""
+
+    if ! config_bool INSTALL_CROWDSEC; then
+        echo "info|CrowdSec mit Bouncer und Collections|INSTALL_CROWDSEC ist nicht gesetzt"
+        return 0
+    fi
+
+    if ! command -v cscli >/dev/null 2>&1; then
+        echo "abweichung|CrowdSec ist nicht installiert (kein cscli)|CrowdSec mit Bouncer und Collections"
+        return 0
+    fi
+
+    bouncers="$(cscli bouncers list -o raw 2>/dev/null | grep -c .)"
+    collections="$(cscli collections list -o raw 2>/dev/null | grep -c '^crowdsecurity/')"
+
+    [ "${bouncers:-0}" -gt 0 ] || missing="kein Firewall-Bouncer registriert"
+    [ "${collections:-0}" -gt 0 ] || missing="${missing:+$missing, }keine Collections installiert"
+
+    if [ -z "$missing" ]; then
+        echo "ok|CrowdSec mit $bouncers Bouncer(s) und $collections Collections"
+    else
+        echo "abweichung|$missing|CrowdSec mit Bouncer und Collections"
+    fi
+    return 0
+}

@@ -171,3 +171,31 @@ module_status() {
 
     echo "${NE_VERSION}, ${active} auf Port ${NE_PORT}/tcp"
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local active="inaktiv"
+
+    if ! config_bool INSTALL_NODE_EXPORTER; then
+        echo "info|Node Exporter nicht angefordert|INSTALL_NODE_EXPORTER ist nicht gesetzt"
+        return 0
+    fi
+
+    if [ ! -x /usr/local/bin/node_exporter ] && ! command -v node_exporter >/dev/null 2>&1; then
+        echo "abweichung|INSTALL_NODE_EXPORTER ist gesetzt, /usr/local/bin/node_exporter liegt nicht vor|Binary fehlt"
+        return 0
+    fi
+
+    systemctl is-active --quiet node_exporter 2>/dev/null && active="aktiv"
+
+    if [ "$active" != "aktiv" ]; then
+        echo "abweichung|INSTALL_NODE_EXPORTER ist gesetzt, node_exporter laeuft nicht|Binary vorhanden, Dienst inaktiv"
+        return 0
+    fi
+
+    echo "ok|Node Exporter aktiv auf Port ${NE_PORT}/tcp"
+    return 0
+}

@@ -71,3 +71,65 @@ module_status() {
         echo "heute keine Aktualisierung"
     fi
 }
+
+# Ziel: es stehen keine Paket-Updates mehr aus. Gezählt wird je nach
+# Paketmanager - die Zählung selbst verändert nichts am System (Simulation
+# bzw. reine Abfrage).
+module_audit() {
+    local raw updates rc=0
+
+    if ! config_bool SYSTEM_UPDATE; then
+        echo "info|Keine ausstehenden Paket-Updates|SYSTEM_UPDATE ist nicht gesetzt"
+        return 0
+    fi
+
+    case "$PKG_MANAGER" in
+        apt)
+            # -s simuliert nur, "Inst"-Zeilen sind aktualisierbare Pakete.
+            raw="$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null)"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                echo "info|Keine ausstehenden Paket-Updates|Paketlisten nicht auswertbar"
+                return 0
+            fi
+            updates="$(printf '%s\n' "$raw" | grep -c '^Inst ')"
+            ;;
+        yum|dnf)
+            # check-update: 0 = aktuell, 100 = Updates vorhanden, sonst Fehler.
+            raw="$("$PKG_MANAGER" check-update 2>/dev/null)"
+            rc=$?
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 100 ]; then
+                echo "info|Keine ausstehenden Paket-Updates|check-update nicht auswertbar"
+                return 0
+            fi
+            updates="$(printf '%s\n' "$raw" | grep -cE '^[^[:space:]]+\.[^[:space:]]+[[:space:]]')"
+            ;;
+        zypper)
+            if ! command -v zypper >/dev/null 2>&1; then
+                echo "info|Keine ausstehenden Paket-Updates|zypper fehlt"
+                return 0
+            fi
+            # Erste Spalte von list-updates ist der Status (v = Update vorhanden).
+            updates="$(zypper --non-interactive list-updates 2>/dev/null | grep -cE '^[vi][[:space:]]*\|')"
+            ;;
+        pacman)
+            if ! command -v pacman >/dev/null 2>&1; then
+                echo "info|Keine ausstehenden Paket-Updates|pacman fehlt"
+                return 0
+            fi
+            # pacman -Qu vergleicht gegen die lokale Sync-Datenbank.
+            updates="$(pacman -Qu 2>/dev/null | grep -c .)"
+            ;;
+        *)
+            echo "info|Keine ausstehenden Paket-Updates|unbekannter Paketmanager: ${PKG_MANAGER:-nicht ermittelt}"
+            return 0
+            ;;
+    esac
+
+    if [ "${updates:-0}" -eq 0 ]; then
+        echo "ok|Keine ausstehenden Paket-Updates"
+    else
+        echo "abweichung|$updates Paket(e) über $PKG_MANAGER aktualisierbar|Keine ausstehenden Paket-Updates"
+    fi
+    return 0
+}

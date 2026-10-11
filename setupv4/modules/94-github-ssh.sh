@@ -437,3 +437,35 @@ module_status() {
         echo "kein SSH-Key für '$target_user'"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local target_user home_dir key_file
+
+    if ! target_user="$(ghssh_resolve_user)"; then
+        echo "info|SSH-Key nicht bewertbar|kein Zielbenutzer ermittelbar - GITHUB_USERNAME, ADMIN_USER und root passen nicht"
+        return 0
+    fi
+
+    home_dir="$(ghssh_user_home "$target_user")"
+    if [ "$target_user" != "root" ]; then
+        home_dir="$(getent passwd "$target_user" 2>/dev/null | cut -d: -f6)"
+        [ -n "$home_dir" ] || home_dir="/home/$target_user"
+    fi
+    key_file="${home_dir}/.ssh/id_ed25519"
+
+    if [ ! -f "$key_file" ]; then
+        echo "abweichung|${key_file} existiert nicht|SSH-Key fehlt für '${target_user}'"
+        return 0
+    fi
+
+    if [ -f "${home_dir}/.ssh/config" ] && grep -q "github.com" "${home_dir}/.ssh/config" 2>/dev/null; then
+        echo "ok|SSH-Key und GitHub-Eintrag für '${target_user}'"
+    else
+        echo "ok|SSH-Key für '${target_user}'|ssh_config ohne GitHub-Eintrag - Verbindung nutzt dann ~/.ssh/id_ed25519 automatisch"
+    fi
+    return 0
+}

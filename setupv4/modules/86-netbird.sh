@@ -253,3 +253,35 @@ module_status() {
         echo "installiert, aber nicht verbunden"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local addr
+
+    if ! config_bool INSTALL_NETBIRD; then
+        echo "info|NetBird nicht angefordert|INSTALL_NETBIRD ist nicht gesetzt"
+        return 0
+    fi
+
+    if ! command -v netbird >/dev/null 2>&1; then
+        echo "abweichung|INSTALL_NETBIRD ist gesetzt, das Binary liegt nicht im PATH|NetBird fehlt"
+        return 0
+    fi
+
+    if ! netbird_connected; then
+        echo "abweichung|INSTALL_NETBIRD ist gesetzt, 'netbird up' fehlt - kein Tunnel steht|installiert, nicht verbunden"
+        return 0
+    fi
+
+    addr="$(netbird_ipv4)"
+    if [ -z "$addr" ]; then
+        echo "abweichung|NetBird laeuft, aber das Interface wt0 hat keine IPv4-Adresse|verbunden, wt0 ohne IPv4"
+        return 0
+    fi
+
+    echo "ok|verbunden, wt0 = ${addr}"
+    return 0
+}

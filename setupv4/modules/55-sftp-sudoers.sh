@@ -105,3 +105,34 @@ module_status() {
         echo "keine Regel für '$user'"
     fi
 }
+
+# Ziel: die NOPASSWD-Regel liegt unter /etc/sudoers.d. Ist SFTP_SUDOERS nicht
+# gesetzt, gibt es bewusst kein Ziel - dann ist "keine Regel" der Sollzustand.
+module_audit() {
+    local user file
+
+    if ! config_bool SFTP_SUDOERS; then
+        echo "info|SFTP-Sudoers-Regel für den Admin-Benutzer|SFTP_SUDOERS ist nicht gesetzt"
+        return 0
+    fi
+
+    user="$(config_get ADMIN_USER "")"
+    if [ -z "$user" ]; then
+        echo "info|SFTP-Sudoers-Regel für den Admin-Benutzer|ADMIN_USER ist nicht gesetzt"
+        return 0
+    fi
+
+    file="/etc/sudoers.d/92-sftp-nopasswd-${user//[$]/}"
+
+    if [ ! -d /etc/sudoers.d ]; then
+        echo "abweichung|/etc/sudoers.d fehlt|NOPASSWD-Regel für $user"
+        return 0
+    fi
+
+    if [ -f "$file" ]; then
+        echo "ok|NOPASSWD-Regel für $user vorhanden"
+    else
+        echo "abweichung|$file fehlt|NOPASSWD-Regel für $user"
+    fi
+    return 0
+}

@@ -301,3 +301,29 @@ module_status() {
         echo "$(docker_version), IPv6 nicht aktiviert"
     fi
 }
+
+# Ziel: Docker ist installiert und die daemon.json aktiviert IPv6 - ohne die
+# beiden nächsten Module (Pangolin/NetBird) laeuft auf diesem Server nichts.
+module_audit() {
+    if ! config_bool INSTALL_DOCKER; then
+        echo "info|Docker mit daemon.json (IPv6)|INSTALL_DOCKER ist nicht gesetzt"
+        return 0
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "abweichung|docker ist nicht installiert|Docker mit daemon.json (IPv6)"
+        return 0
+    fi
+
+    if [ ! -f "$DOCKER_DAEMON_JSON" ]; then
+        echo "abweichung|$DOCKER_DAEMON_JSON fehlt|Docker mit daemon.json (IPv6)"
+        return 0
+    fi
+
+    if grep -q '"ipv6": true' "$DOCKER_DAEMON_JSON" 2>/dev/null; then
+        echo "ok|$(docker_version), daemon.json mit IPv6"
+    else
+        echo "abweichung|$(docker_version), aber keine IPv6-Konfiguration|Docker mit daemon.json (IPv6)"
+    fi
+    return 0
+}

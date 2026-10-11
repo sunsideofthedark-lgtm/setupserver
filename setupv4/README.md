@@ -69,6 +69,7 @@ sudo /opt/serversetup/setup.sh --status
 | `--non-interactive` | Keine Rückfragen — fehlende Werte brechen ab |
 | `--list` | Verfügbare Module auflisten |
 | `--status` | Status der gewählten Module prüfen |
+| `--audit` | Ist-Zustand gegen die Zielkonfiguration prüfen |
 | `--init` | Beispielkonfiguration erzeugen |
 | `--no-profile` | Server-Profil ignorieren |
 | `--no-relocate` | Nicht nach `/opt/serversetup` umziehen |
@@ -163,6 +164,35 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 99 | `verify` | Netzwerk-/Docker-Verifikation | — |
 
 `--list` zeigt die Liste immer aktuell an, `--status` prüft den Zustand.
+
+### Status und Audit
+
+`--status` beantwortet „was ist gerade eingerichtet?". `--audit` geht einen
+Schritt weiter und vergleicht das mit dem, was die **Konfiguration** will:
+
+```
+$ sudo bash setup.sh --audit --config config/setup.conf
+
+  hostname               Server-Hostname          ABWEICHUNG
+                                                  ist:  aktuell: su-004
+                                                  soll: Hostname su-007
+  timezone               Zeitzone                 ABWEICHUNG
+                                                  ist:  aktuell: Europe/Berlin
+                                                  soll: Zeitzone Europe/Vienna
+  firewall               Firewall                 nicht prüfbar: ufw aktiv
+                                                  ufw ist nicht installiert
+------------------------------------------------------------
+  Im Zielzustand: 2 | Abweichungen: 2 | Nicht prüfbar: 1
+```
+
+Drei Zustände: `ok` (Ziel erreicht), `abweichung` (Ziel nicht erreicht) und
+`info` (nicht bewertbar, z. B. weil das Paket auf dieser Distribution nicht
+vorhanden ist). Der Exit-Code ist `1`, sobald mindestens eine Abweichung
+gemeldet wird — damit lässt sich der Audit in eine Prüf-Pipeline einhängen.
+
+Der Audit liest nur und verändert nichts. Er ist damit das Werkzeug für die
+Frage „was ist auf diesem Server veraltet?" — etwa um einen mit `setupv3.sh`
+eingerichteten Server auf `setupv4` umzuschätzen, ohne etwas anzufassen.
 
 ---
 

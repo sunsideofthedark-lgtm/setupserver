@@ -875,3 +875,35 @@ module_status() {
 
     echo "$user: $details"
 }
+
+# Ziel: ADMIN_USER existiert und ist Mitglied in der Admin-Gruppe der
+# Distribution sowie in 'remotessh' - Letzteres ist die Voraussetzung für
+# AllowGroups in der SSH-Härtung. Fehlende Gruppen sammeln sich im Detail.
+module_audit() {
+    local user admin_group missing=""
+
+    user="$(config_get ADMIN_USER "")"
+    if [ -z "$user" ]; then
+        echo "info|Admin-Benutzer mit sudo und remotessh|ADMIN_USER ist nicht in der Config gesetzt"
+        return 0
+    fi
+
+    admin_group="$(users_admin_group)"
+
+    if ! users_user_exists "$user"; then
+        echo "abweichung|Benutzer existiert nicht|Benutzer $user in $admin_group + remotessh"
+        return 0
+    fi
+
+    id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx "$admin_group" \
+        || missing="$admin_group"
+    id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx remotessh \
+        || missing="${missing:+$missing, }remotessh"
+
+    if [ -z "$missing" ]; then
+        echo "ok|Benutzer $user in $admin_group + remotessh"
+    else
+        echo "abweichung|nicht Mitglied in: $missing|Benutzer $user in $admin_group + remotessh"
+    fi
+    return 0
+}

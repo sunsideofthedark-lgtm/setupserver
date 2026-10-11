@@ -117,3 +117,27 @@ module_status() {
         echo "nicht installiert"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    if ! config_bool INSTALL_NODEJS; then
+        echo "info|Node.js nicht angefordert|INSTALL_NODEJS ist nicht gesetzt"
+        return 0
+    fi
+
+    if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+        echo "ok|node $(node_version) / npm $(npm_version)"
+        return 0
+    fi
+
+    if command -v node >/dev/null 2>&1; then
+        echo "abweichung|node $(node_version) ist da, npm nicht im PATH - INSTALL_NODEJS ist gesetzt|npm fehlt"
+        return 0
+    fi
+
+    echo "abweichung|INSTALL_NODEJS ist gesetzt, keine Installation vorhanden|node und npm fehlen"
+    return 0
+}

@@ -118,3 +118,42 @@ module_status() {
 
     echo "installiert, sshd-Jail auf Port ${jail_port}"
 }
+
+# Ziel: Fail2Ban ist installiert und der sshd-Jail in der jail.local aktiviert.
+module_audit() {
+    local jail_port
+
+    if ! config_bool INSTALL_FAIL2BAN; then
+        echo "info|Fail2Ban mit aktivem sshd-Jail|INSTALL_FAIL2BAN ist nicht gesetzt"
+        return 0
+    fi
+
+    if ! command -v fail2ban-server >/dev/null 2>&1; then
+        echo "abweichung|Fail2Ban ist nicht installiert|Fail2Ban mit aktivem sshd-Jail"
+        return 0
+    fi
+
+    if [ ! -f "$F2B_JAIL_LOCAL" ]; then
+        echo "abweichung|$F2B_JAIL_LOCAL fehlt|Fail2Ban mit aktivem sshd-Jail"
+        return 0
+    fi
+
+    jail_port="$(awk '/^\[sshd\]/{f=1;next} /^\[/{f=0} f&&/^port/{print $3;exit}' \
+        "$F2B_JAIL_LOCAL" 2>/dev/null)"
+
+    if ! awk '/^\[sshd\]/{f=1;next} /^\[/{f=0} f' "$F2B_JAIL_LOCAL" 2>/dev/null \
+        | grep -qiE '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true'; then
+        echo "abweichung|sshd-Jail fehlt oder ist nicht aktiviert|Fail2Ban mit aktivem sshd-Jail"
+        return 0
+    fi
+
+    # Den Dienst nur bewerten, wenn wirklich systemd läuft - in Containern und
+    # ohne systemd sagt is-active nichts über die Konfiguration aus.
+    if [ -d /run/systemd/system ] && ! systemctl is-active --quiet fail2ban 2>/dev/null; then
+        echo "abweichung|Jail ist aktiv, der Dienst läuft aber nicht|Fail2Ban mit aktivem sshd-Jail auf Port ${jail_port:--}"
+        return 0
+    fi
+
+    echo "ok|Fail2Ban mit aktivem sshd-Jail auf Port ${jail_port:--}"
+    return 0
+}

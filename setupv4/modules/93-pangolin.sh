@@ -299,3 +299,41 @@ module_status() {
         echo "nicht eingerichtet"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local site_name config_dir config_file
+    site_name="$(hostname)"
+    config_dir="${PANGOLIN_STACK_BASE}/newt_${site_name}"
+    config_file="${config_dir}/config.json"
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "info|Pangolin nicht bewertbar|Docker ist nicht installiert - der Newt-Container setzt Docker voraus"
+        return 0
+    fi
+
+    if docker ps 2>/dev/null | grep -q "newt-${site_name}"; then
+        if pangolin_provisioned "$config_file"; then
+            echo "ok|config.json provisioniert, Newt-Container laeuft"
+        else
+            echo "abweichung|${config_file} enthaelt noch keine Site-ID|Container laeuft, nicht provisioniert"
+        fi
+        return 0
+    fi
+
+    if pangolin_provisioned "$config_file"; then
+        echo "abweichung|${config_file} ist provisioniert, newt-${site_name} ist aber nicht aktiv|Newt-Container laeuft nicht"
+        return 0
+    fi
+
+    if [ -f "$config_file" ]; then
+        echo "abweichung|${config_file} ist vorhanden, der erste newt-Start steht aus|Noch nicht provisioniert"
+        return 0
+    fi
+
+    echo "abweichung|${config_dir} wurde noch nicht angelegt|config.json fehlt"
+    return 0
+}

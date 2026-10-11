@@ -142,3 +142,22 @@ module_status() {
         echo "aktuell: $current, Ziel: $target"
     fi
 }
+
+# Ziel: der gesetzte Hostname entspricht SERVER_HOSTNAME aus der Config.
+module_audit() {
+    local current target
+    current="$(hostname 2>/dev/null || echo unbekannt)"
+    target="$(config_get SERVER_HOSTNAME "")"
+
+    if [ -z "$target" ]; then
+        echo "info|Hostname $current|SERVER_HOSTNAME ist nicht in der Config gesetzt"
+        return 0
+    fi
+
+    if [ "$target" = "$current" ]; then
+        echo "ok|Hostname $target"
+    else
+        echo "abweichung|aktuell: $current|Hostname $target"
+    fi
+    return 0
+}

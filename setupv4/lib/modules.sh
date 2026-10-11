@@ -370,3 +370,78 @@ show_run_summary() {
     echo "  Log: $LOGFILE"
     echo "============================================================"
 }
+
+# --- Audit ---
+# Beantwortet die Frage: "Was ist auf diesem Server bereits eingerichtet?"
+# Jedes Modul liefert über module_audit() eine Zeile "IST|SOLL" oder
+# "IST|SOLL|<Abweichung>". Der Aufrufer wertet das aus.
+#
+# Erwartetes Format aus module_audit():
+#   ok|ZIEL        - Zielzustand erreicht
+#   abweichung|IST|SOLL - Zielzustand nicht erreicht
+#   info|WAS|WARUM - Zustand nicht bewertbar
+show_audit() {
+    local module_id name finding state target detail
+    local ok=0 abweichung=0 info=0
+
+    echo ""
+    echo "============================================================"
+    info "Audit: Ist-Zustand gegen Ziel aus der Konfiguration"
+    echo "------------------------------------------------------------"
+
+    for module_id in "${SELECTED_MODULES[@]}"; do
+        name=$(module_name_for "$module_id")
+
+        if ! load_module "$module_id" 2>/dev/null; then
+            printf "  %-22s %-34s %s\n" "$module_id" "$name" "Ladefehler"
+            info=$((info + 1))
+            continue
+        fi
+
+        if ! declare -f module_audit >/dev/null 2>&1; then
+            printf "  %-22s %-34s %s\n" "$module_id" "$name" "—"
+            info=$((info + 1))
+            continue
+        fi
+
+        finding=$(module_audit 2>/dev/null | head -n 1)
+        state=$(echo "$finding" | cut -d'|' -f1)
+        target=$(echo "$finding" | cut -d'|' -f2)
+        detail=$(echo "$finding" | cut -d'|' -f3-)
+
+        [ -z "$target" ] && target="—"
+
+        case "$state" in
+            ok)
+                printf "  %-22s %-34s %s\n" "$module_id" "$name" "$target"
+                ok=$((ok + 1))
+                ;;
+            abweichung)
+                printf "  %-22s %-34s %s\n" "$module_id" "$name" "ABWEICHUNG"
+                if [ -n "$detail" ]; then
+                    printf "  %-22s %-34s   ist:  %s\n" "" "" "$target"
+                    printf "  %-22s %-34s   soll: %s\n" "" "" "$detail"
+                else
+                    printf "  %-22s %-34s   ist:  %s\n" "" "" "$target"
+                fi
+                abweichung=$((abweichung + 1))
+                ;;
+            info)
+                printf "  %-22s %-34s %s\n" "$module_id" "$name" "nicht prüfbar: $target"
+                [ -n "$detail" ] && printf "  %-22s %-34s   %s\n" "" "" "$detail"
+                info=$((info + 1))
+                ;;
+            *)
+                printf "  %-22s %-34s %s\n" "$module_id" "$name" "unbekannter Zustand"
+                info=$((info + 1))
+                ;;
+        esac
+    done
+
+    echo "------------------------------------------------------------"
+    echo "  Im Zielzustand: $ok | Abweichungen: $abweichung | Nicht prüfbar: $info"
+    echo "============================================================"
+
+    [ "$abweichung" -gt 0 ] && return 1
+    return 0
+}

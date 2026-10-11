@@ -249,3 +249,43 @@ module_status() {
             ;;
     esac
 }
+
+# Ziel: die Firewall der Distribution ist aktiv. Welche das ist, entscheidet
+# detect_os() über $FIREWALL_CMD.
+module_audit() {
+    local state=""
+
+    case "$FIREWALL_CMD" in
+        ufw)
+            if ! command -v ufw >/dev/null 2>&1; then
+                echo "info|ufw aktiv|ufw ist nicht installiert"
+                return 0
+            fi
+
+            state="$(ufw status 2>/dev/null | head -n1)"
+            if [ -z "$state" ]; then
+                echo "info|ufw aktiv|ufw status lieferte keinen Zustand"
+            elif printf '%s' "$state" | grep -qi "inactive"; then
+                echo "abweichung|Firewall ist installiert, aber inaktiv|ufw aktiv"
+            else
+                echo "ok|ufw aktiv"
+            fi
+            ;;
+        firewall-cmd)
+            if ! command -v firewall-cmd >/dev/null 2>&1; then
+                echo "info|firewalld aktiv|firewalld ist nicht installiert"
+                return 0
+            fi
+
+            if firewall-cmd --state >/dev/null 2>&1; then
+                echo "ok|firewalld aktiv"
+            else
+                echo "abweichung|firewalld läuft nicht|firewalld aktiv"
+            fi
+            ;;
+        *)
+            echo "info|Firewall aktiv|unbekanntes Backend: ${FIREWALL_CMD:-nicht ermittelt}"
+            ;;
+    esac
+    return 0
+}

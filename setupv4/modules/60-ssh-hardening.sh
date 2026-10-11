@@ -317,3 +317,46 @@ module_status() {
 
     echo "$details"
 }
+
+# Ziel: Port aus der Config, Root-Login aus, nur Schlüssel-Login und Zugriff
+# ausschliesslich über 'remotessh'. Alle Einzelabweichungen sammeln sich im
+# Detailfeld, damit genau eine Zeile entsteht.
+module_audit() {
+    local config port missing=""
+
+    config="$(ssh_config_file)"
+    if [ ! -f "$config" ]; then
+        echo "info|SSH gehärtet auf Port ${SSH_PORT:-?} über remotessh|sshd_config nicht gefunden: $config"
+        return 0
+    fi
+
+    if [ -z "$SSH_PORT" ]; then
+        echo "info|SSH gehärtet, Port aus der Config|SSH_PORT ist nicht gesetzt"
+        return 0
+    fi
+
+    port="$(ssh_current_port)"
+    if [ "$port" != "$SSH_PORT" ]; then
+        missing="Port $port statt $SSH_PORT"
+    fi
+
+    if config_bool DISABLE_ROOT_LOGIN \
+        && ! grep -qE "^#*PermitRootLogin[[:space:]]+no" "$config" 2>/dev/null; then
+        missing="${missing:+$missing, }PermitRootLogin nicht auf no"
+    fi
+
+    if ! grep -qE "^#*PasswordAuthentication[[:space:]]+no" "$config" 2>/dev/null; then
+        missing="${missing:+$missing, }PasswordAuthentication nicht auf no"
+    fi
+
+    if ! grep -qE "^AllowGroups[[:space:]]+remotessh" "$config" 2>/dev/null; then
+        missing="${missing:+$missing, }AllowGroups remotessh fehlt"
+    fi
+
+    if [ -z "$missing" ]; then
+        echo "ok|Port $SSH_PORT, nur Schlüssel über remotessh"
+    else
+        echo "abweichung|$missing|Port $SSH_PORT, nur Schlüssel über remotessh"
+    fi
+    return 0
+}

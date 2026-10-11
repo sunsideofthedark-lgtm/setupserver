@@ -275,3 +275,29 @@ module_status() {
         echo "nicht eingerichtet"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local compose_file="${KOMODO_DEFAULT_ROOT_DIR}/compose.yml"
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "info|Komodo nicht bewertbar|Docker ist nicht installiert - ohne Docker laeuft kein Periphery-Agent"
+        return 0
+    fi
+
+    if komodo_running; then
+        echo "ok|Container komodo-periphery laeuft"
+        return 0
+    fi
+
+    if [ -f "$compose_file" ]; then
+        echo "abweichung|${compose_file} ist vorhanden, komodo-periphery ist aber nicht aktiv|Container laeuft nicht"
+        return 0
+    fi
+
+    echo "abweichung|${compose_file} wurde noch nicht erzeugt|Compose-Datei fehlt"
+    return 0
+}

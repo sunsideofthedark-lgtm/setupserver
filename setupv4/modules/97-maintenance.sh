@@ -195,3 +195,42 @@ module_status() {
 
     echo "${parts# }"
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+# Bewertet wird nur, was die Konfiguration anfordert - ein nicht gesetzter
+# Schalter ist kein Ziel und damit keine Abweichung.
+module_audit() {
+    local do_logrotate=0 do_disk=0
+    local missing=""
+
+    config_bool MAINTENANCE_LOGROTATE && do_logrotate=1
+    config_bool MAINTENANCE_DISK_MONITOR && do_disk=1
+
+    if [ "$do_logrotate" = "1" ] && [ ! -f "$MAINT_LOGROTATE_FILE" ]; then
+        missing="Logrotation"
+    fi
+
+    if [ "$do_disk" = "1" ]; then
+        if [ ! -x "$MAINT_DISK_SCRIPT" ]; then
+            missing="${missing}${missing:+, }Monitor-Skript"
+        elif ! crontab -l 2>/dev/null | grep -qF "$MAINT_DISK_SCRIPT"; then
+            missing="${missing}${missing:+, }Disk-Monitor-Cronjob"
+        fi
+    fi
+
+    if [ "$do_logrotate" = "0" ] && [ "$do_disk" = "0" ]; then
+        echo "info|Keine Wartung angefordert|MAINTENANCE_LOGROTATE und MAINTENANCE_DISK_MONITOR sind nicht gesetzt"
+        return 0
+    fi
+
+    if [ -n "$missing" ]; then
+        echo "abweichung|die angeforderte Wartung ist nicht vollständig eingerichtet|fehlt: ${missing}"
+        return 0
+    fi
+
+    echo "ok|Logrotation und Disk-Monitor-Cronjob (02:00) aktiv"
+    return 0
+}

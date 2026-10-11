@@ -53,6 +53,7 @@ Optionen:
       --non-interactive  Keine Rückfragen - fehlende Werte führen zum Abbruch
       --list             Verfügbare Module auflisten und beenden
       --status           Status der gewählten Module prüfen
+      --audit            Ist-Zustand gegen die Zielkonfiguration prüfen
       --init             Beispielkonfiguration erzeugen
       --no-profile       Server-Profil config/servers/<hostname>.conf ignorieren
       --no-relocate      Nicht nach $SETUP_HOME umziehen, direkt hier laufen
@@ -85,6 +86,17 @@ relocate_to_setup_home() {
     if [ "${!reloc_flag:-0}" = "1" ]; then
         return 0
     fi
+
+    # Sicherheitsprüfung: weiter unten wird "rm -rf $SETUP_HOME/lib" ausgeführt.
+    # Ein leeres oder "/" als Ziel würde damit Systemverzeichnisse löschen.
+    case "$SETUP_HOME" in
+        ""|"/"|"/etc"|"/usr"|"/var"|"/bin"|"/sbin"|"/lib"|"/home"|"/root")
+            echo -e "${C_RED}[ERROR] Ungültiges SETUP_HOME: '$SETUP_HOME'${C_RESET}" >&2
+            echo "        Das Ziel darf weder leer noch ein Systemverzeichnis sein." >&2
+            echo "        Mit --no-relocate direkt am aktuellen Ort laufen." >&2
+            return 1
+            ;;
+    esac
 
     mkdir -p "$SETUP_HOME/lib" "$SETUP_HOME/modules" \
              "$SETUP_HOME/config" "$SETUP_HOME/logs" 2>/dev/null || {
@@ -121,6 +133,7 @@ relocate_to_setup_home() {
 DO_INIT=""
 SHOW_LIST=""
 SHOW_STATUS=""
+SHOW_AUDIT=""
 USE_PROFILE=1
 DO_RELOCATE=1
 
@@ -141,6 +154,7 @@ while [ $# -gt 0 ]; do
         --no-relocate)      DO_RELOCATE=0; shift ;;
         --list)             SHOW_LIST=1; shift ;;
         --status)           SHOW_STATUS=1; shift ;;
+      --audit)            SHOW_AUDIT=1; shift ;;
         --init)             DO_INIT=1; shift ;;
         -h|--help)          usage; exit 0 ;;
         *)                  echo "Unbekannte Option: $1" >&2; usage; exit 1 ;;
@@ -292,6 +306,13 @@ fi
 if [ -n "$SHOW_STATUS" ]; then
     show_module_status
     exit 0
+fi
+
+# --- Audit: Ist-Zustand gegen Ziel aus der Konfiguration ---
+if [ -n "$SHOW_AUDIT" ]; then
+    detect_os
+    show_audit
+    exit $?
 fi
 
 # --- Zusammenfassung ---

@@ -60,3 +60,22 @@ module_status() {
         echo "nicht installiert"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    if ! clamav_installed; then
+        echo "abweichung|Modul wurde ausgewählt, aber weder Paket noch freshclam gefunden|ClamAV fehlt"
+        return 0
+    fi
+
+    if ! command -v clamscan >/dev/null 2>&1; then
+        echo "abweichung|ClamAV ist installiert, aber der Scanner liegt nicht im PATH|clamscan fehlt"
+        return 0
+    fi
+
+    echo "ok|ClamAV installiert, clamscan verfügbar"
+    return 0
+}

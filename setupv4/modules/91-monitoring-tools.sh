@@ -111,3 +111,41 @@ module_status() {
         echo "${present}/${total} vorhanden"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+# Geprueft wird nur, was die Konfiguration auch wirklich anfordert - ein
+# nicht gesetzter Schalter ist kein Ziel und damit keine Abweichung.
+module_audit() {
+    local entry key _ command
+    local wanted=0 missing=""
+
+    for entry in "${MONTOOLS_LIST[@]}"; do
+        IFS='|' read -r key _ command <<< "$entry"
+
+        config_bool "$key" || continue
+        wanted=$((wanted + 1))
+
+        # Ohne Pruefkommando (DB-Clients) gibt es nichts zu bewerten
+        if [ -z "$command" ]; then
+            continue
+        fi
+
+        command -v "$command" >/dev/null 2>&1 || missing="${missing}${key#INSTALL_} "
+    done
+
+    if [ "$wanted" -eq 0 ]; then
+        echo "info|Keine Werkzeuge angefordert|kein INSTALL_*-Schalter dieses Moduls ist gesetzt"
+        return 0
+    fi
+
+    if [ -n "$missing" ]; then
+        echo "abweichung|die angeforderten Werkzeuge sind nicht alle installiert|fehlt: ${missing% }"
+        return 0
+    fi
+
+    echo "ok|alle ${wanted} angeforderten Werkzeuge vorhanden"
+    return 0
+}

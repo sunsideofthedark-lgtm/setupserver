@@ -68,3 +68,32 @@ module_status() {
 
     echo "Version ${version}, ${active}"
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local version active="inaktiv"
+
+    if ! config_bool INSTALL_NGINX; then
+        echo "info|NGINX nicht angefordert|INSTALL_NGINX ist nicht gesetzt"
+        return 0
+    fi
+
+    if ! is_package_installed "nginx" "nginx"; then
+        echo "abweichung|INSTALL_NGINX ist gesetzt, das Paket ist nicht installiert|NGINX fehlt"
+        return 0
+    fi
+
+    version="$(nginx -v 2>&1 | sed 's|.*nginx/||')"
+    systemctl is-active --quiet nginx 2>/dev/null && active="aktiv"
+
+    if [ "$active" != "aktiv" ]; then
+        echo "abweichung|INSTALL_NGINX ist gesetzt, 'systemctl enable --now nginx' steht aus|NGINX ${version} installiert, Dienst inaktiv"
+        return 0
+    fi
+
+    echo "ok|NGINX ${version}, aktiv"
+    return 0
+}

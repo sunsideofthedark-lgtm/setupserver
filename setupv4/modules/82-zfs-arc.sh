@@ -131,3 +131,31 @@ module_status() {
         echo "zfs_arc_max nicht gesetzt (Standard: 50% des RAMs)"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local current_arc_max current_arc_gb
+
+    if ! zfs_available; then
+        echo "info|ARC-Cache nicht anwendbar|kein ZFS-Dateisystem auf diesem Server"
+        return 0
+    fi
+
+    if ! config_bool INSTALL_ZFS_ARC; then
+        echo "info|ARC-Cache nicht angefordert|INSTALL_ZFS_ARC ist nicht gesetzt"
+        return 0
+    fi
+
+    current_arc_max=$(cat "$ZFS_ARC_PARAM" 2>/dev/null || echo "")
+    if [ -n "$current_arc_max" ] && [ "$current_arc_max" -gt 0 ] 2>/dev/null; then
+        current_arc_gb=$((current_arc_max / 1024 / 1024 / 1024))
+        echo "ok|zfs_arc_max auf ${current_arc_gb}GB begrenzt"
+        return 0
+    fi
+
+    echo "abweichung|INSTALL_ZFS_ARC ist gesetzt, ZFS laeuft mit dem Standard von 50% des RAMs|zfs_arc_max nicht gesetzt"
+    return 0
+}

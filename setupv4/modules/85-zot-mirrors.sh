@@ -293,3 +293,50 @@ module_status() {
         echo "${count}/${#ZOT_REGISTRIES[@]} konfiguriert, containerd INAKTIV"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local count=0
+    local item domain total
+    total="${#ZOT_REGISTRIES[@]}"
+
+    if ! config_bool ZOT_MIRRORS; then
+        echo "info|Keine Zot-Mirrors angefordert|ZOT_MIRRORS ist nicht gesetzt"
+        return 0
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "info|hosts.toml nicht bewertbar|Docker ist nicht installiert - die Mirror-Dateien wuerden ohnehin ignoriert"
+        return 0
+    fi
+
+    for item in "${ZOT_REGISTRIES[@]}"; do
+        IFS="|" read -r domain _ _ <<< "$item"
+        if [ -f "${ZOT_CERTS_DIR}/${domain}/hosts.toml" ]; then
+            count=$((count + 1))
+        fi
+    done
+
+    # Ohne containerd Image Store ist die Konfiguration wirkungslos - das ist
+    # der schwerwiegendere Befund und steht deshalb vorn.
+    if ! zot_containerd_store_active; then
+        echo "abweichung|containerd Image Store inaktiv|${count}/${total} hosts.toml vorhanden, aber Docker wertet sie ohne containerd-Snapshotter nicht aus"
+        return 0
+    fi
+
+    if [ "$count" -eq 0 ]; then
+        echo "abweichung|keine hosts.toml|ZOT_MIRRORS ist gesetzt, unter ${ZOT_CERTS_DIR} liegt keine einzige hosts.toml"
+        return 0
+    fi
+
+    if [ "$count" -lt "$total" ]; then
+        echo "abweichung|nur ${count}/${total} hosts.toml|$((total - count)) Registry-Mirror(s) fehlen unter ${ZOT_CERTS_DIR}"
+        return 0
+    fi
+
+    echo "ok|${count}/${total} hosts.toml, containerd aktiv"
+    return 0
+}

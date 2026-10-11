@@ -174,3 +174,35 @@ module_status() {
 
     echo "Netzwerk ${net}, Docker ${docker}"
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local net="offline"
+    local docker_state="fehlt"
+
+    if ! command -v ping >/dev/null 2>&1; then
+        echo "info|Konnektivität nicht prüfbar|ping ist nicht installiert"
+        return 0
+    fi
+
+    ping -c 1 "$VERIFY_TEST_IPV4" >/dev/null 2>&1 && net="online"
+
+    if command -v docker >/dev/null 2>&1; then
+        if docker info >/dev/null 2>&1; then
+            docker_state="erreichbar"
+        else
+            docker_state="Daemon antwortet nicht"
+        fi
+    fi
+
+    if [ "$net" != "online" ] || [ "$docker_state" != "erreichbar" ]; then
+        echo "abweichung|Netzwerk ${net}, Docker ${docker_state}|Abschlussprüfung nicht bestanden"
+        return 0
+    fi
+
+    echo "ok|Netzwerk online, Docker erreichbar"
+    return 0
+}

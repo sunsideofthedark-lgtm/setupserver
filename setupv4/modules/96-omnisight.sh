@@ -167,3 +167,26 @@ module_status() {
         echo "Agent nicht installiert"
     fi
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local active="inaktiv"
+
+    if ! omnisight_installed; then
+        echo "abweichung|Unit ${OMNISIGHT_UNIT} ist nicht vorhanden - der Omnisight Agent wurde nicht installiert|Agent fehlt"
+        return 0
+    fi
+
+    systemctl is-active --quiet "$OMNISIGHT_UNIT" 2>/dev/null && active="aktiv"
+
+    if [ "$active" != "aktiv" ]; then
+        echo "abweichung|${OMNISIGHT_UNIT} laeuft nicht|Agent installiert, Dienst inaktiv"
+        return 0
+    fi
+
+    echo "ok|Agent aktiv (${OMNISIGHT_UNIT})"
+    return 0
+}

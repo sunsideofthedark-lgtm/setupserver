@@ -131,3 +131,31 @@ module_status() {
 
     echo "Root ${locked}, sudoers ${sudoers}"
 }
+
+# --- Audit ---
+# Gibt genau eine Zeile "ZUSTAND|ZIELZUSTAND|BEGRUENDUNG" aus und sonst nichts:
+# show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
+# die Tabelle zerreissen.
+module_audit() {
+    local locked="nein"
+    local missing=""
+
+    if ! config_bool DISABLE_ROOT_LOGIN; then
+        echo "info|Root nicht angefordert|DISABLE_ROOT_LOGIN ist nicht gesetzt"
+        return 0
+    fi
+
+    # 'passwd -S root' meldet den Status im zweiten Feld (L = gesperrt)
+    passwd -S root 2>/dev/null | awk '{print $2}' | grep -q '^L' && locked="ja"
+
+    [ "$locked" = "ja" ] || missing="Root-Sperre"
+    [ -f "$ROOTDIS_SECURITY_FILE" ] || missing="${missing}${missing:+, }$(basename "$ROOTDIS_SECURITY_FILE")"
+
+    if [ -n "$missing" ]; then
+        echo "abweichung|DISABLE_ROOT_LOGIN ist gesetzt, die Härtung ist unvollständig|fehlt: ${missing}"
+        return 0
+    fi
+
+    echo "ok|Root gesperrt, sudoers-Regel aktiv"
+    return 0
+}
