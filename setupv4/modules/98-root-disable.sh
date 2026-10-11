@@ -21,7 +21,7 @@
 MODULE_ID="root-disable"
 MODULE_NAME="Root-Deaktivierung"
 MODULE_DESC="Sperrt den Root-Account, verschärft sudo und räumt alte sudoers-Dateien auf"
-MODULE_ORDER=96
+MODULE_ORDER=98
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit")
 

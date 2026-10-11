@@ -30,7 +30,7 @@
 MODULE_ID="omnisight"
 MODULE_NAME="Omnisight Agent"
 MODULE_DESC="Omnisight Agent installieren und mit Token registrieren"
-MODULE_ORDER=94b
+MODULE_ORDER=96
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("monitoring" "agent")
 

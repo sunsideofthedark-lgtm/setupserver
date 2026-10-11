@@ -16,7 +16,7 @@
 MODULE_ID="clamav"
 MODULE_NAME="ClamAV Antivirus"
 MODULE_DESC="ClamAV installieren und Viren-Datenbank aktualisieren"
-MODULE_ORDER=93b
+MODULE_ORDER=95
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit" "virenschutz")
 

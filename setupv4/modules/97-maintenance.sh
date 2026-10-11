@@ -17,7 +17,7 @@
 MODULE_ID="maintenance"
 MODULE_NAME="System-Wartung"
 MODULE_DESC="Log-Rotation und täglichen Disk-Space-Monitor per Cronjob einrichten"
-MODULE_ORDER=95
+MODULE_ORDER=97
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("wartung")
 
