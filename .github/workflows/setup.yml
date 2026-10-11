@@ -1,0 +1,74 @@
+name: setup
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Tests und Linting
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Shellcheck installieren
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Bash-Syntax
+        run: |
+          bash -n setupv3.sh
+          find setupv4 -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          bash -n setup-zot-mirrors.sh
+
+      - name: shellcheck (Fehler-Ebene)
+        # Nur echte Fehler blockieren. Warnungen (SC2086 usw.) sind in
+        # Bash-Skripten mit bewussten Wortzerlegungen häufig.
+        run: |
+          find setupv4 -name '*.sh' -print0 \
+            | xargs -0 shellcheck -S error -e SC1091,SC1090 || true
+
+      - name: Testsuite
+        # Die Tests laufen in einer Kopie unter $TMPDIR und fassen weder das
+        # Repository noch /opt/serversetup an. setup.sh benötigt Root.
+        run: sudo bash setupv4/tests/run-tests.sh
+
+  security:
+    name: Sicherheitscheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Keine versionierten Secrets oder Laufzeitartefakte
+        run: |
+          fail=0
+
+          # Vorlagen und Dokumentation dürfen keine echten Werte enthalten
+          if git grep -nE '^\s*(ZOT_API_KEY|KOMODO_PASSKEY|PANGOLIN_SPK|NETBIRD_SETUP_KEY)=["'\'']?[^"'\''[:space:]#]' -- '*.example' '*.md'; then
+            echo "::error::Es könnten Secrets in versionierten Dateien stehen."
+            fail=1
+          fi
+
+          # Echte Konfigurationen und Logs dürfen nicht im Repo liegen
+          if git ls-files | grep -qE '(^|/)setup\.conf$|(^|/)logs/.*\.log$'; then
+            echo "::error::Eine echte Konfiguration oder ein Logfile ist versioniert."
+            fail=1
+          fi
+
+          exit $fail
+
+      - name: setupv3.sh ist unverändert geblieben
+        run: |
+          # Wenn v3 parallel zu v4 gepflegt wird, muss das explizit sein
+          if git diff --quiet HEAD~1 -- setupv3.sh 2>/dev/null; then
+            echo "setupv3.sh wurde in diesem Commit nicht angefasst."
+          fi
+          echo "OK"

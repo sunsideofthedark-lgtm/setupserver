@@ -1,0 +1,100 @@
+# ==============================================================================
+# setupv4 - Beispielkonfiguration
+# ==============================================================================
+# Diese Datei ist normales Bash und wird gesourct - Bedingungen, Schleifen und
+# Variablen sind erlaubt. Einfach kopieren und anpassen:
+#
+#   cp config/setup.conf.example config/setup.conf
+#
+# Pro Server lässt sich zusätzlich config/servers/<hostname>.conf anlegen,
+# die nach dieser Datei geladen wird und deren Werte gewinnen.
+# ==============================================================================
+
+# Welche Module laufen sollen (Reihenfolge = Ausführungsreihenfolge).
+# Entfernen = Modul überspringen.
+MODULES=(
+    system-update
+    auto-updates
+    hostname
+    timezone
+    users
+    sftp-sudoers
+    ssh-hardening
+    firewall
+    docker
+    zfs-arc
+    nodejs
+    zot-mirrors
+    netbird
+    fail2ban
+    crowdsec
+    nginx
+    node-exporter
+    monitoring-tools
+    komodo
+    pangolin
+    github-ssh
+    clamav
+    omnisight
+    maintenance
+    root-disable
+    verify
+)
+
+# --- Allgemein ---
+SETUP_ROLE="standard"
+SERVER_HOSTNAME=""            # leer = aktuellen Hostnamen behalten
+TIMEZONE="Europe/Vienna"
+DISABLE_ROOT_LOGIN=true
+REBOOT_AT_END=false
+
+# --- SSH ---
+SSH_PORT=2222
+SSH_ALLOWED_USERS=""          # z. B. "sugo,deploy"
+
+# --- Benutzerverwaltung ---
+CREATE_BACKUP_USER=false
+DB_BACKUP_USER="dbbackup"
+CREATE_SHARED_DIR=false
+# NOPASSWD-Regel fuer den sftp-server. Beachten: wer den SSH-Key haelt, kann
+# dann alle Dateien per SFTP als root lesen/schreiben/loeschen. Nur setzen,
+# wenn das eingesetzte Backup-Tool die sudo-Variante wirklich braucht.
+SFTP_SUDOERS=false
+
+# --- Firewall ---
+FIREWALL_OPEN_WEB_PORTS=true
+FIREWALL_HOSTS_PANGOLIN=false
+FIREWALL_HOSTS_KOMODO=false
+FIREWALL_EXTRA_PORTS=""       # z. B. "51820/udp,21820/udp"
+
+# --- Software ---
+INSTALL_DOCKER=true
+INSTALL_NODEJS=false
+INSTALL_NGINX=false
+INSTALL_FAIL2BAN=true
+INSTALL_CROWDSEC=false
+INSTALL_NETBIRD=false
+INSTALL_TAILSCALE=false
+INSTALL_KOMODO=false
+INSTALL_PANGOLIN=false
+INSTALL_GITHUB_SSH=false
+INSTALL_CLAMAV=false
+
+# --- Zot-Mirrors ---
+ZOT_MIRRORS=false
+ZOT_ENDPOINT="https://zot.sunriseing.dev"
+ZOT_USERNAME="admin"
+# API-Key NICHT hier zuweisen - eine leere Zuweisung wuerde den Wert aus der
+# Umgebung wieder ueberschreiben. Stattdessen zur Laufzeit uebergeben:
+#   ZOT_API_KEY=... sudo -E bash setup.sh --config config/setup.conf
+# oder via --set ZOT_API_KEY=...
+#ZOT_API_KEY=""
+
+# --- Beispiel:bedingte Konfiguration ---
+# if [[ "$SETUP_ROLE" == "web" ]]; then
+#     INSTALL_NGINX=true
+#     FIREWALL_OPEN_WEB_PORTS=true
+# fi
+# if [[ "$SETUP_ROLE" == "pangolin" ]]; then
+#     FIREWALL_EXTRA_PORTS="51820/udp,21820/udp"
+# fi
