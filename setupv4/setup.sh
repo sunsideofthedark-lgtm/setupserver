@@ -54,6 +54,7 @@ Optionen:
       --list             Verfügbare Module auflisten und beenden
       --status           Status der gewählten Module prüfen
       --audit            Ist-Zustand gegen die Zielkonfiguration prüfen
+      --check-reboot     Prüfen, ob ein Neustart nötig ist
       --init             Beispielkonfiguration erzeugen
       --no-profile       Server-Profil config/servers/<hostname>.conf ignorieren
       --no-relocate      Nicht nach $SETUP_HOME umziehen, direkt hier laufen
@@ -134,6 +135,7 @@ DO_INIT=""
 SHOW_LIST=""
 SHOW_STATUS=""
 SHOW_AUDIT=""
+CHECK_REBOOT=""
 USE_PROFILE=1
 DO_RELOCATE=1
 
@@ -155,6 +157,7 @@ while [ $# -gt 0 ]; do
         --list)             SHOW_LIST=1; shift ;;
         --status)           SHOW_STATUS=1; shift ;;
       --audit)            SHOW_AUDIT=1; shift ;;
+        --check-reboot)     CHECK_REBOOT=1; shift ;;
         --init)             DO_INIT=1; shift ;;
         -h|--help)          usage; exit 0 ;;
         *)                  echo "Unbekannte Option: $1" >&2; usage; exit 1 ;;
@@ -163,6 +166,10 @@ done
 
 if [ "$DO_RELOCATE" = "1" ]; then
     relocate_to_setup_home "${ORIGINAL_ARGS[@]}"
+else
+    # Ohne Verlagerung bleibt alles am Aufrufort - sonst würden die
+    # Bibliotheken weiterhin unter $SETUP_HOME gesucht und nicht gefunden.
+    SETUP_HOME="$ORIGIN_DIR"
 fi
 
 # Ab hier ist der Pfad fest
@@ -199,6 +206,24 @@ done
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     echo -e "${C_RED}[ERROR] Dieses Script muss als Root ausgeführt werden.${C_RESET}" >&2
     echo "Verwende: sudo bash $0 $*" >&2
+    exit 1
+fi
+
+# --- Reboot-Prüfung ---
+# Braucht keine Konfiguration und läuft deshalb vor allem anderen.
+# Exit-Code 1 = Neustart nötig, 0 = nicht nötig. So direkt in eine Prüf-Pipeline
+# einbindbar.
+if [ -n "$CHECK_REBOOT" ]; then
+    echo ""
+    # reboot_required gibt 0 zurück, wenn KEIN Neustart nötig ist
+    if reboot_required; then
+        echo -e "${C_GREEN}[REBOOT] Kein Neustart erforderlich${C_RESET}"
+        echo "  Laufender Kernel: $(uname -r)"
+        exit 0
+    fi
+    echo -e "${C_YELLOW}[REBOOT] Neustart erforderlich${C_RESET}"
+    echo "  Grund:         ${REBOOT_REASONS:-unbekannt}"
+    echo "  Erkannt über:  ${REBOOT_SOURCE:-unbekannt}"
     exit 1
 fi
 
@@ -373,14 +398,35 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 # --- Neustart ---
-if config_bool REBOOT_AT_END; then
+# Ein Neustart kann auch dann nötig sein, wenn REBOOT_AT_END=false ist:
+# unattended-upgrades installiert im Hintergrund neue Kernel, die erst nach
+# einem Neustart aktiv werden. Genau diese Falle wird hier aufgedeckt.
+if reboot_required; then
+    REBOOT_NEEDED=0
+else
+    REBOOT_NEEDED=1
     echo ""
-    if ask_yes_no "Server jetzt neu starten?" "n"; then
+    warning "Ein Neustart wäre erforderlich: $REBOOT_REASONS"
+    echo "        Erkannt über: $REBOOT_SOURCE"
+    if config_bool REBOOT_AT_END; then
+        echo "        REBOOT_AT_END ist gesetzt - siehe unten."
+    else
+        echo "        Neustart später manuell: sudo systemctl reboot"
+        echo "        jederzeit nachprüfbar mit: sudo bash setup.sh --check-reboot"
+    fi
+fi
+
+if [ "$REBOOT_NEEDED" = "1" ] && config_bool REBOOT_AT_END; then
+    echo ""
+    if ask_yes_no "Server jetzt neu starten?" "y"; then
         info "Server wird neu gestartet..."
         run_cmd reboot
     else
         skip "Neustart übersprungen"
     fi
+elif config_bool REBOOT_AT_END; then
+    echo ""
+    skip "REBOOT_AT_END ist gesetzt, aber es ist kein Neustart erforderlich"
 fi
 
 echo ""

@@ -152,13 +152,18 @@ module_main() {
 
     echo ""
     echo -e "${C_YELLOW}===================================================================${C_RESET}"
-    echo -e "${C_YELLOW}Der Server sollte nun neu gestartet werden, um alle Änderungen zu übernehmen.${C_RESET}"
+    if reboot_required; then
+        echo -e "${C_YELLOW}Ein Neustart ist erforderlich: ${REBOOT_REASONS}${C_RESET}"
+        echo -e "${C_YELLOW}(erkannt über ${REBOOT_SOURCE})${C_RESET}"
+    else
+        echo -e "${C_YELLOW}Der Server sollte neu gestartet werden, um alle Änderungen zu übernehmen.${C_RESET}"
+    fi
     echo -e "${C_YELLOW}===================================================================${C_RESET}"
     echo ""
 
-    # Bewusst KEIN Reboot hier - das Hauptscript fragt am Ende selbst nach
-    # (REBOOT_AT_END) und startet den Server nur dort neu.
-    info "Ein Neustart wird nur vom Hauptscript ausgeführt (REBOOT_AT_END)."
+    # Bewusst KEIN Reboot hier - das Hauptscript prüft am Ende selbst
+    # (reboot_required + REBOOT_AT_END) und startet nur dort neu.
+    info "Ein Neustart erfolgt nur über das Hauptscript (REBOOT_AT_END)."
 
     # Die Prüfungen sind Diagnostik: ein fehlgeschlagener Test ist ein Hinweis,
     # aber kein Fehler des Setups - der Server bleibt nutzbar.
@@ -168,11 +173,13 @@ module_main() {
 module_status() {
     local net="offline"
     local docker="nicht installiert"
+    local reboot="nicht nötig"
 
     ping -c 1 "$VERIFY_TEST_IPV4" >/dev/null 2>&1 && net="online"
     command -v docker >/dev/null 2>&1 && docker="vorhanden"
+    reboot_required && reboot="nötig"
 
-    echo "Netzwerk ${net}, Docker ${docker}"
+    echo "Netzwerk ${net}, Docker ${docker}, Reboot ${reboot}"
 }
 
 # --- Audit ---

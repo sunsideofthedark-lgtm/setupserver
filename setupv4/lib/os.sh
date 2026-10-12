@@ -6,6 +6,57 @@
 # installieren oder Services steuern, greifen ausschliesslich auf diese Datei zu.
 # ==============================================================================
 
+# --- Reboot-Erkennung ---
+# Prüft, ob ein Neustart nötig ist - der typische Fall ist ein durch
+# unattended-upgrades installierter neuer Kernel, der ohne Neustart
+# nicht aktiv wird.
+#
+# Rückgabe:  0 = kein Neustart nötig
+#            1 = Neustart nötig, Begründung in $REBOOT_REASONS
+REBOOT_REASONS=""
+REBOOT_SOURCE=""
+
+reboot_required() {
+    REBOOT_REASONS=""
+    REBOOT_SOURCE=""
+
+    # Signal 1: expliziter Marker von needrestart / unattended-upgrades
+    # (Debian, Ubuntu). /var/run ist meist ein Symlink auf /run.
+    local marker=""
+    for marker in /run/reboot-required /var/run/reboot-required; do
+        if [ -f "$marker" ]; then
+            REBOOT_SOURCE="Marker $marker"
+            local pkgs=""
+            for pkgs in /run/reboot-required.pkgs /var/run/reboot-required.pkgs; do
+                if [ -f "$pkgs" ]; then
+                    REBOOT_REASONS=$(tr '\n' ' ' < "$pkgs" 2>/dev/null | xargs)
+                    break
+                fi
+            done
+            [ -z "$REBOOT_REASONS" ] && REBOOT_REASONS="Systemaktualisierung"
+            return 1
+        fi
+    done
+
+    # Signal 2: laufender Kernel weicht vom neuesten installierten ab.
+    # Funktioniert distributionsübergreifend, im Gegensatz zum Marker oben.
+    local running newest highest
+    running="$(uname -r)"
+    newest="$(ls -1 /lib/modules/ 2>/dev/null | sort -V | tail -n 1)"
+    if [ -n "$newest" ] && [ "$running" != "$newest" ]; then
+        highest="$(printf '%s\n%s\n' "$running" "$newest" | sort -V | tail -n 1)"
+        # Nur melden, wenn die installierte Version auch die neuere ist -
+        # ein bewusst zurückgesetzter Kernel ist keine Reboot-Aufforderung.
+        if [ "$highest" = "$newest" ]; then
+            REBOOT_SOURCE="Kernelvergleich /lib/modules"
+            REBOOT_REASONS="Kernel ${running} läuft, ${newest} ist installiert"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
 # Führt einen Befehl aus - im Dry-Run-Modus wird nur angezeigt.
 run_cmd() {
     if [ "$DRY_RUN" = "1" ]; then
