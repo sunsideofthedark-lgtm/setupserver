@@ -434,6 +434,143 @@ gitssh_ensure_key() {
     return 0
 }
 
+# ==============================================================================
+# API-Upload-Helfer (Top-Level, damit sie in module_main() verfuegbar sind)
+# ==============================================================================
+    # ==============================================================================
+# API-Upload: öffentlichen Schlüssel beim Dienst registrieren
+# ==============================================================================
+# Löst das Token für einen Dienst auf. Reihenfolge:
+#   1. GIT_SSH_TOKEN_<KURZNAME> aus der Umgebung oder --set
+#   2. interaktive verdeckte Abfrage
+# Gibt das Token auf stdout aus, legt den Status in $GITS_TOKEN_STATE ab
+# (found / asked / missing).
+GITS_TOKEN_STATE=""
+GITS_RESOLVED_TOKEN=""
+
+gitssh_resolve_token() {
+    local short="$1"
+    # Grossschreibung: der Dienst heisst "github", die Variable
+    # GIT_SSH_TOKEN_GITHUB. Ohne ${short^^} wuerde nie ein Token gefunden.
+    local var_name="GIT_SSH_TOKEN_${short^^}"
+    GITS_RESOLVED_TOKEN="${!var_name:-}"
+    GITS_TOKEN_STATE="missing"
+
+    if [ -n "$GITS_RESOLVED_TOKEN" ]; then
+        GITS_TOKEN_STATE="found"
+        return 0
+    fi
+
+    if [ "$NON_INTERACTIVE" = "1" ]; then
+        debug "Kein Token fuer $short ($var_name) gesetzt - nicht-interaktiv."
+        return 1
+    fi
+
+    echo ""
+    if ask_yes_no "Soll der Key automatisch über die API bei $short registriert werden? (Token erforderlich)" "n"; then
+        if ! ask_secret "API-Token für $short" GITS_RESOLVED_TOKEN; then
+            GITS_RESOLVED_TOKEN=""
+            return 1
+        fi
+        GITS_TOKEN_STATE="asked"
+        return 0
+    fi
+
+    GITS_RESOLVED_TOKEN=""
+    return 1
+}
+
+# Baut API-Endpunkt und Auth-Header für einen Dienst.
+# GitHub: eigenes API-Host, Bearer. Forgejo/Gitea: <basis>/api/v1, "token".
+gitssh_api_endpoint() {
+    local host="$1" base_url="$2"
+    if [ "$host" = "github.com" ]; then
+        echo "https://api.github.com/user/keys"
+    else
+        echo "${base_url%/}/api/v1/user/keys"
+    fi
+}
+
+gitssh_auth_header() {
+    local host="$1" token="$2"
+    # Forgejo verlangt historisch das Wort "token" vor dem Wert; GitHub
+    # erwartet Bearer. Beides wird von den jeweiligen Diensten akzeptiert.
+    if [ "$host" = "github.com" ]; then
+        echo "Authorization: Bearer $token"
+    else
+        echo "Authorization: token $token"
+    fi
+}
+
+# Registriert den öffentlichen Key per API beim Dienst.
+#
+# WICHTIG: curl wird hier bewusst direkt aufgerufen und NICHT über run_eval.
+# run_eval protokolliert sein Argument im Logfile - ein Token im Argument
+# würde dort im Klartext landen.
+gitssh_upload_key_via_api() {
+    local host="$1" short="$2" base_url="$3"
+    local pub_file="$4" comment="$5" token="$6"
+    local endpoint auth payload title code body response_file
+
+    endpoint="$(gitssh_api_endpoint "$host" "$base_url")"
+    auth="$(gitssh_auth_header "$host" "$token")"
+    title="$comment"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        warning "curl ist nicht installiert - Key muss manuell hochgeladen werden."
+        return 1
+    fi
+
+    payload_key="$(tr -d '\n' < "$pub_file" 2>/dev/null || true)"
+    [ -n "$payload_key" ] || payload_key="ssh-ed25519 <wird bei der Ausführung erzeugt>"
+    payload=$(printf '{"title":"%s","key":"%s"}' "$title" "$payload_key")
+
+    if [ "$DRY_RUN" = "1" ]; then
+        echo -e "${C_MAGENTA}[DRY-RUN] würde POST ${endpoint} (Titel: ${title}, Token: $(mask_secret "$token"))${C_RESET}" >&2
+        log_action "DRY-RUN" "upload public key to ${endpoint}"
+        return 0
+    fi
+
+    response_file=$(mktemp)
+    code=$(curl -sS -o "$response_file" -w '%{http_code}' \
+        -X POST \
+        -H "Accept: application/vnd.github+json" \
+        -H "Content-Type: application/json" \
+        -H "$auth" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -d "$payload" \
+        "$endpoint" 2>/dev/null || echo "000")
+
+    case "$code" in
+        200|201)
+            success "Key bei $host registriert (Titel: $title)"
+            rm -f "$response_file"
+            return 0
+            ;;
+        422)
+            # Key existiert bereits - unkritisch
+            success "Key bei $host bereits registriert"
+            rm -f "$response_file"
+            return 0
+            ;;
+        401|403)
+            error "Token für $host abgelehnt (HTTP $code) - Berechtigung oder Token falsch."
+            body=$(head -c 200 "$response_file" 2>/dev/null)
+            debug "Antwort: $body"
+            rm -f "$response_file"
+            return 1
+            ;;
+        *)
+            error "Key-Upload zu $host fehlgeschlagen (HTTP $code)"
+            body=$(head -c 200 "$response_file" 2>/dev/null)
+            debug "Antwort: $body"
+            rm -f "$response_file"
+            return 1
+            ;;
+    esac
+}
+
+
 module_main() {
     local target_user home_dir ssh_dir key_comment entry host short own url
     local generic_key generic_needed=0 github_authed=0
@@ -610,7 +747,7 @@ module_main() {
         gitssh_known_hosts_add "$ssh_dir" "$target_user" "$host"
     done
 
-    # --- GitHub CLI: fertigen Key hochladen ---
+# --- GitHub CLI: fertigen Key hochladen ---
     if [ "$github_authed" = "1" ] && [ -f "${ssh_dir}/id_ed25519_github.pub" ]; then
         echo ""
         info "Lade den Key über die GitHub CLI hoch..."
@@ -622,6 +759,52 @@ module_main() {
         else
             warning "Verbindung zu $GITS_GITHUB_HOST nicht bestätigt - bitte den Key in der Weboberfläche prüfen."
         fi
+    fi
+
+    # --- Key über die API registrieren ---
+    # Ohne Token bleibt der manuelle Weg: der öffentliche Key wird ausgegeben
+    # und muss in der Weboberfläche hinterlegt werden.
+    echo ""
+    local uploaded=0 manual=0
+    for entry in "${GITS_SERVICES[@]}"; do
+        IFS='|' read -r host short own url <<< "$entry"
+        [ "$own" = "1" ] || continue
+
+        local pub_file="${ssh_dir}/id_ed25519_${short}.pub"
+        if [ ! -f "$pub_file" ] && [ "$DRY_RUN" != "1" ]; then
+            debug "Kein oeffentlicher Key fuer $host vorhanden - Upload uebersprungen."
+            manual=$((manual + 1))
+            continue
+        fi
+
+        if ! gitssh_resolve_token "$short"; then
+            manual=$((manual + 1))
+            continue
+        fi
+
+        if gitssh_upload_key_via_api "$host" "$short" "$url" \
+                "$pub_file" "$key_comment" "$GITS_RESOLVED_TOKEN"; then
+            uploaded=$((uploaded + 1))
+        else
+            manual=$((manual + 1))
+        fi
+        GITS_RESOLVED_TOKEN=""
+    done
+
+    if [ "$uploaded" -gt 0 ]; then
+        success "✅ $uploaded Schlüssel per API registriert."
+    fi
+    if [ "$manual" -gt 0 ]; then
+        info "$manual Schlüssel müssen noch von Hand in der Weboberfläche hinterlegt werden."
+        for entry in "${GITS_SERVICES[@]}"; do
+            IFS='|' read -r host short own url <<< "$entry"
+            [ "$own" = "1" ] || continue
+            pub_file="${ssh_dir}/id_ed25519_${short}.pub"
+            [ -f "$pub_file" ] || continue
+            echo ""
+            echo -e "  ${host} (Titel: ${key_comment}):"
+            echo "    $(cat "$pub_file")"
+        done
     fi
 
     # --- Git-Identität ---

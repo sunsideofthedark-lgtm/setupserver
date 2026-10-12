@@ -89,6 +89,12 @@ GIT_KEY_COMMENT_DOMAIN="sunriseing.dev"
 # oder die Zeile loeschen.
 GIT_SSH_SERVICES="github.com|github|1|https://github.com
 forgejo.sunriseing.dev|forgejo|1|https://forgejo.sunriseing.dev"
+# API-Token, um die oeffentlichen Keys automatisch zu registrieren. Pro Dienst
+# GIT_SSH_TOKEN_<DIENST> in GROSSBUCHSTABEN. Bewusst NICHT hier eintragen,
+# sondern ueber die Umgebung uebergeben:
+#   GIT_SSH_TOKEN_GITHUB=... GIT_SSH_TOKEN_FORGEJO=... sudo -E bash setup.sh --config ...
+# GitHub braucht ein PAT mit "Git SSH keys: write", Forgejo ein Token mit
+# passendem Scope.
 INSTALL_CLAMAV=false
 
 # --- Zot-Mirrors ---
