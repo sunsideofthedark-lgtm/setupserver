@@ -34,7 +34,7 @@ MODULES=(
     monitoring-tools
     komodo
     pangolin
-    github-ssh
+    git-ssh
     clamav
     omnisight
     maintenance
@@ -78,7 +78,17 @@ INSTALL_NETBIRD=false
 INSTALL_TAILSCALE=false
 INSTALL_KOMODO=false
 INSTALL_PANGOLIN=false
-INSTALL_GITHUB_SSH=false
+INSTALL_GIT_SSH=false
+# Domain fuer den SSH-Key-Kommentar - der Kommentar selbst ist immer
+# "<hostname>@<domain>", also auf su-001 z. B. su-001@sunriseing.dev
+GIT_KEY_COMMENT_DOMAIN="sunriseing.dev"
+# Pro Zeile ein Git-Dienst: "<hostname>|<kurzname>|<eigener Block>|<Basis-URL>"
+# Der Key heisst ~/.ssh/id_ed25519_<kurzname>. "eigener Block" 1 = eigener
+# Key mit eigenem IdentityFile, 0 = generischer Key ohne ssh_config-Block.
+# Die Forgejo-Domain ist ein Platzhalter - an den eigenen Server anpassen
+# oder die Zeile loeschen.
+GIT_SSH_SERVICES="github.com|github|1|https://github.com
+forgejo.sunriseing.dev|forgejo|1|https://forgejo.sunriseing.dev"
 INSTALL_CLAMAV=false
 
 # --- Zot-Mirrors ---

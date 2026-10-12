@@ -158,7 +158,7 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 92 | `komodo` | Komodo Periphery | `INSTALL_KOMODO`, `KOMODO_PASSKEY` |
 | 93 | `pangolin` | Pangolin SPK / Newt | `INSTALL_PANGOLIN`, `PANGOLIN_SPK` |
 | 93b | `clamav` | ClamAV | `INSTALL_CLAMAV` |
-| 94 | `github-ssh` | GitHub SSH-Key | `INSTALL_GITHUB_SSH`, `GITHUB_USERNAME` |
+| 94 | `git-ssh` | Git SSH-Keys (GitHub, Forgejo, Gitea) | `INSTALL_GIT_SSH`, `GIT_SSH_SERVICES`, `GIT_KEY_COMMENT_DOMAIN` |
 | 94b | `omnisight` | Omnisight Agent | `OMNISIGHT_URL`, `OMNISIGHT_TOKEN`, `OMNISIGHT_ROLE` |
 | 95 | `maintenance` | Wartung + Cron | `MAINTENANCE_LOGROTATE`, `MAINTENANCE_DISK_MONITOR` |
 | 96 | `root-disable` | Root deaktivieren | `DISABLE_ROOT_LOGIN` |
