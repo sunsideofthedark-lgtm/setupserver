@@ -140,6 +140,7 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 20 | `auto-updates` | Automatische Sicherheitsupdates | `AUTO_UPDATES` |
 | 30 | `hostname` | Server-Hostname | `SET_HOSTNAME`, `SERVER_HOSTNAME` |
 | 40 | `timezone` | Zeitzone + NTP | `SET_TIMEZONE`, `TIMEZONE` |
+| 45 | `tuning` | System-Tuning | `TUNING_SYSCTL`, `TUNING_SWAP`, `TUNING_JOURNALD` |
 | 50 | `users` | Benutzerverwaltung | `ADMIN_USER`, `CREATE_BACKUP_USER`, `CREATE_SHARED_DIR` |
 | 55 | `sftp-sudoers` | SFTP-Sudoers-Regel | `SFTP_SUDOERS`, `ADMIN_USER` |
 | 60 | `ssh-hardening` | SSH-Härtung | `SSH_PORT`, `DISABLE_ROOT_LOGIN`, `SSH_ALLOWED_USERS` |

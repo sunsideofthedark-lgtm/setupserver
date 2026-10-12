@@ -17,6 +17,7 @@ MODULES=(
     auto-updates
     hostname
     timezone
+    tuning
     users
     sftp-sudoers
     ssh-hardening
