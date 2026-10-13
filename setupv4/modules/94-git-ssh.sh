@@ -522,10 +522,16 @@ gitssh_hint_scope() {
         echo "  Ein Token mit nur diesem Scope liefert bei /user/keys HTTP 404."
     else
         echo "    fine-grained: Kategorie \"user\" auf \"Lesen und Schreiben\""
+        echo "                  (entspricht dem klassischen Scope write:user)"
         echo "    klassisch:     Scope \"write:user\""
         echo ""
-        echo "  Der Authorization-Header muss 'Authorization: token <token>' sein,"
-        echo "  Forgejo verlangt das Wort 'token' davor."
+        echo "  Repository-Zugriff NICHT auf \"Bestimmte Repositories\" stellen:"
+        echo "  damit sind laut Forgejo-Doku ausschliesslich die Scopes"
+        echo "  read/write:repository und read/write:issue erlaubt - \"user\""
+        echo "  waere damit gar nicht erst auswaehlbar."
+        echo ""
+        echo "  Der Authorization-Header muss 'Authorization: token <token>'"
+        echo "  sein, Forgejo verlangt das Wort 'token' davor."
     fi
     echo ""
 }
