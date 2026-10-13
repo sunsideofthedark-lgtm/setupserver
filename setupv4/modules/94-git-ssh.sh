@@ -798,6 +798,23 @@ module_main() {
             generic_needed=1
         fi
     done
+
+    # Die benoetigte Token-Berechtigung steht hier bewusst VOR dem Lauf, nicht
+    # erst im Fehlerfall. Wer einen Token anlegen will, soll die Anforderung
+    # vorab sehen und nicht erst nach einem HTTP 404.
+    echo ""
+    echo "Benoetigte Token-Berechtigung (nur wenn die Keys automatisch registriert werden sollen):"
+    for entry in "${GITS_SERVICES[@]}"; do
+        IFS='|' read -r host short own url <<< "$entry"
+        [ "$own" = "1" ] || continue
+        if [ "$host" = "github.com" ]; then
+            echo "  ${host}: GitHub-PAT mit admin:public_key"
+        else
+            echo "  ${host}: Forgejo-Token, Kategorie 'user' auf 'Lesen und Schreiben'"
+        fi
+        echo "    übergeben als GIT_SSH_TOKEN_$(printf '%s' "$short" | tr '[:lower:]' '[:upper:]')"
+    done
+    echo "    ohne Token werden die Keys nur ausgegeben und sind manuell zu hinterlegen."
     echo ""
 
     # --- GitHub CLI: nur für github.com, bei Forgejo/Gitea gibt es sie nicht ---

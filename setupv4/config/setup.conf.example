@@ -78,7 +78,7 @@ INSTALL_NETBIRD=false
 INSTALL_TAILSCALE=false
 INSTALL_KOMODO=false
 INSTALL_PANGOLIN=false
-INSTALL_GIT_SSH=false
+INSTALL_GIT_SSH=true
 # Domain fuer den SSH-Key-Kommentar - der Kommentar selbst ist immer
 # "<hostname>@<domain>", also auf su-001 z. B. su-001@sunriseing.dev
 GIT_KEY_COMMENT_DOMAIN="sunriseing.dev"
@@ -93,14 +93,28 @@ git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev"
 # GIT_SSH_TOKEN_<DIENST> in GROSSBUCHSTABEN. Bewusst NICHT hier eintragen,
 # sondern ueber die Umgebung uebergeben:
 #   GIT_SSH_TOKEN_GITHUB=... GIT_SSH_TOKEN_FORGEJO=... sudo -E bash setup.sh --config ...
-# GitHub-Scope fuer einen klassischen PAT: admin:public_key
-# ("Full control of user public keys"). Das deckt alle drei Aufrufe ab:
-#   GET    /user/keys        -> read:public_key   (Reste finden)
-#   POST   /user/keys        -> write:public_key  (Key registrieren)
-#   DELETE /user/keys/{id}   -> admin:public_key  (alten Key entfernen)
-# Das Löschen braucht admin, nicht nur write. Der Scope gilt ausschließlich für
-# öffentliche SSH-Schlüssel, nicht für Repositories oder Organisationen.
-# Forgejo braucht ein Token mit passendem Scope (read:user, write:user).
+#
+# Benoetigte Berechtigung je Dienst:
+#
+#   github.com          PAT mit  admin:public_key
+#                        ("Full control of user public keys")
+#                        Lesen  -> GET    /user/keys
+#                        Schreiben -> POST   /user/keys
+#                        Loeschen -> DELETE /user/keys/{id}   (braucht admin!)
+#                        NICHT 'write:admin:ssh_signing_key' - das gilt fuer
+#                        Commit-Signaturen, nicht fuer Anmelde-Keys. Ein Token
+#                        nur damit liefert HTTP 404 statt 401.
+#
+#   git.sunriseing.dev  fine-grained: Kategorie "user" auf "Lesen und Schreiben"
+#                        klassisch:     Scope "write:user"
+#                        Der Authorization-Header muss
+#                        "Authorization: token <token>" lauten, Forgejo
+#                        verlangt das Wort "token" davor.
+#                        Repository-Zugriff NICHT auf "Bestimmte Repositories",
+#                        sonst ist der Scope "user" gar nicht erst waehlbar.
+#
+# Ohne Token bleibt der manuelle Weg: der oeffentliche Key wird ausgegeben und
+# muss in der Weboberflaeche hinterlegt werden.
 INSTALL_CLAMAV=false
 
 # --- Zot-Mirrors ---
