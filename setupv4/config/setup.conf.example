@@ -85,10 +85,10 @@ GIT_KEY_COMMENT_DOMAIN="sunriseing.dev"
 # Pro Zeile ein Git-Dienst: "<hostname>|<kurzname>|<eigener Block>|<Basis-URL>"
 # Der Key heisst ~/.ssh/id_ed25519_<kurzname>. "eigener Block" 1 = eigener
 # Key mit eigenem IdentityFile, 0 = generischer Key ohne ssh_config-Block.
-# Die Forgejo-Domain ist ein Platzhalter - an den eigenen Server anpassen
-# oder die Zeile loeschen.
+# Domain und Basis-URL je Dienst. Bei einer anderen Instanz anpassen oder
+# die Zeile loeschen.
 GIT_SSH_SERVICES="github.com|github|1|https://github.com
-forgejo.sunriseing.dev|forgejo|1|https://forgejo.sunriseing.dev"
+git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev"
 # API-Token, um die oeffentlichen Keys automatisch zu registrieren. Pro Dienst
 # GIT_SSH_TOKEN_<DIENST> in GROSSBUCHSTABEN. Bewusst NICHT hier eintragen,
 # sondern ueber die Umgebung uebergeben:

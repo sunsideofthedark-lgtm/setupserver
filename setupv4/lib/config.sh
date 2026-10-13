@@ -129,7 +129,7 @@ config_set_defaults() {
     GIT_SSH_TOKEN_FORGEJO="${GIT_SSH_TOKEN_FORGEJO:-}"
     # Ein Eintrag je Zeile: "<hostname>|<kurzname>|<eigener Block>|<Basis-URL>"
     GIT_SSH_SERVICES="${GIT_SSH_SERVICES:-github.com|github|1|https://github.com
-forgejo.sunriseing.dev|forgejo|1|https://forgejo.sunriseing.dev}"
+git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev}"
 
     # --- Zot-Mirrors ---
     ZOT_MIRRORS="${ZOT_MIRRORS:-false}"
@@ -426,7 +426,7 @@ GIT_KEY_COMMENT_DOMAIN="sunriseing.dev"
 # Pro Zeile ein Dienst: "<hostname>|<kurzname>|<eigener Block>|<Basis-URL>".
 # Forgejo-Domain an den eigenen Server anpassen oder die Zeile loeschen.
 GIT_SSH_SERVICES="github.com|github|1|https://github.com
-forgejo.sunriseing.dev|forgejo|1|https://forgejo.sunriseing.dev"
+git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev"
 INSTALL_CLAMAV=false
 
 # --- Zot-Mirrors ---

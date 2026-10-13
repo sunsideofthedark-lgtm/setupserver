@@ -582,15 +582,17 @@ gitssh_upload_key_via_api() {
             return 0
             ;;
         422)
-            # 422 ist mehrdeutig. Be live getestet liefern GitHub UND Forgejo
-            # bei beiden folgenden Faellen HTTP 422 mit code "custom":
-            #   "key is already in use"                        -> Key ist registriert
-            #   "key is invalid. You must supply a key in ..."  -> Key ist kaputt
+            # 422 ist mehrdeutig. Live gemessen liefern beide Dienste bei
+            # "Key existiert schon" HTTP 422 mit komplett unterschiedlichem Text:
+            #   GitHub:  "key is already in use"
+            #   Forgejo: "Key content has been used as non-deploy key"
+            # Und bei einem kaputten Key:
+            #   GitHub:  "key is invalid. You must supply a key in ..."
             # Deshalb wird die Meldung ausgewertet statt 422 pauschal als
             # Erfolg zu werten - sonst wuerde ein ungueltiger Key als Erfolg
-            # gemeldet.
+            # gemeldet, und bei Forgejo wuerde der Normalfall als Fehler.
             body=$(head -c 400 "$response_file" 2>/dev/null)
-            if printf '%s' "$body" | grep -qiE 'already|existiert|in use'; then
+            if printf '%s' "$body" | grep -qiE 'already|been used|in use|existiert'; then
                 success "Key bei $host bereits registriert"
                 rm -f "$response_file"
                 return 0
