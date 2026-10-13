@@ -93,8 +93,14 @@ forgejo.sunriseing.dev|forgejo|1|https://forgejo.sunriseing.dev"
 # GIT_SSH_TOKEN_<DIENST> in GROSSBUCHSTABEN. Bewusst NICHT hier eintragen,
 # sondern ueber die Umgebung uebergeben:
 #   GIT_SSH_TOKEN_GITHUB=... GIT_SSH_TOKEN_FORGEJO=... sudo -E bash setup.sh --config ...
-# GitHub braucht ein PAT mit "Git SSH keys: write", Forgejo ein Token mit
-# passendem Scope.
+# GitHub-Scope fuer einen klassischen PAT: admin:public_key
+# ("Full control of user public keys"). Das deckt alle drei Aufrufe ab:
+#   GET    /user/keys        -> read:public_key   (Reste finden)
+#   POST   /user/keys        -> write:public_key  (Key registrieren)
+#   DELETE /user/keys/{id}   -> admin:public_key  (alten Key entfernen)
+# Das Löschen braucht admin, nicht nur write. Der Scope gilt ausschließlich für
+# öffentliche SSH-Schlüssel, nicht für Repositories oder Organisationen.
+# Forgejo braucht ein Token mit passendem Scope (read:user, write:user).
 INSTALL_CLAMAV=false
 
 # --- Zot-Mirrors ---
