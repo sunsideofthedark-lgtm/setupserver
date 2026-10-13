@@ -491,6 +491,12 @@ gitssh_api_endpoint() {
     fi
 }
 
+# Listen-Endpunkt zum Auflisten vorhandener Keys (GET ohne ID)
+gitssh_list_endpoint() {
+    local host="$1" base_url="$2"
+    gitssh_api_endpoint "$host" "$base_url"
+}
+
 gitssh_auth_header() {
     local host="$1" token="$2"
     # Forgejo verlangt historisch das Wort "token" vor dem Wert; GitHub
@@ -569,6 +575,87 @@ gitssh_upload_key_via_api() {
             ;;
     esac
 }
+# ============================================================================
+# API-Rotation: veraltete Keys desselben Titels aufspueren und entfernen
+# ============================================================================
+# Gibt die IDs von Keys aus, die zwar denselben Titel tragen, aber ein anderes
+# Key-Material haben als das, was lokal gerade benutzt wird. Das sind genau die
+# Reste aus frueheren Laeufen - die werden beim Rotieren entsorgt.
+#
+# Der aktuelle Key wird NIE geloescht: waere er weg, waere der Zugang weg.
+gitssh_find_stale_key_ids() {
+    local host="$1" base_url="$2" token="$3"
+    local comment="$4" current_key="$5"
+    local endpoint auth listing
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        debug "python3 fehlt - veraltete Keys koennen nicht erkannt werden."
+        return 1
+    fi
+
+    endpoint="$(gitssh_list_endpoint "$host" "$base_url")"
+    auth="$(gitssh_auth_header "$host" "$token")"
+
+    listing=$(curl -sS --max-time 30 \
+        -H "Accept: application/vnd.github+json" \
+        -H "$auth" \
+        "$endpoint" 2>/dev/null) || return 1
+
+    printf '%s' "$listing" | python3 -c '
+import json, sys
+current = sys.argv[1]
+comment = sys.argv[2]
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if isinstance(data, dict):
+    data = [data]
+for entry in data:
+    if not isinstance(entry, dict):
+        continue
+    if entry.get("title") == comment and entry.get("key") != current:
+        key_id = entry.get("id")
+        if key_id is not None:
+            print(key_id)
+' "$current_key" "$comment" 2>/dev/null
+}
+
+# Loescht genau einen Key beim Dienst.
+gitssh_delete_key() {
+    local host="$1" base_url="$2" token="$3" key_id="$4"
+    local endpoint auth code
+
+    endpoint="$(gitssh_api_endpoint "$host" "$base_url")"
+    auth="$(gitssh_auth_header "$host" "$token")"
+
+    if [ "$DRY_RUN" = "1" ]; then
+        echo -e "${C_MAGENTA}[DRY-RUN] würde DELETE ${endpoint}/${key_id}${C_RESET}" >&2
+        log_action "DRY-RUN" "delete stale key ${key_id} at ${host}"
+        return 0
+    fi
+
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+        -X DELETE \
+        -H "$auth" \
+        "${endpoint}/${key_id}" 2>/dev/null || echo "000")
+
+    case "$code" in
+        200|204)
+            success "  Veralteten Key ${key_id} bei $host entfernt."
+            return 0
+            ;;
+        404)
+            debug "Key ${key_id} bei $host existiert nicht mehr."
+            return 0
+            ;;
+        *)
+            error "  Löschen von Key ${key_id} bei $host fehlgeschlagen (HTTP $code)."
+            return 1
+            ;;
+    esac
+}
+
 
 
 module_main() {
@@ -785,6 +872,17 @@ module_main() {
         if gitssh_upload_key_via_api "$host" "$short" "$url" \
                 "$pub_file" "$key_comment" "$GITS_RESOLVED_TOKEN"; then
             uploaded=$((uploaded + 1))
+
+            # Erst jetzt - wo der aktuelle Key sicher registriert ist - werden
+            # Reste aus frueheren Laeufen entfernt. Die Reihenfolge ist
+            # bewusst: ansonsten gaebe es zwischen DELETE und POST kein
+            # Fenster mit irgendeinem gueltigen Key.
+            stale_ids=$(gitssh_find_stale_key_ids "$host" "$url" \
+                "$GITS_RESOLVED_TOKEN" "$key_comment" \
+                "$(tr -d '\n' < "$pub_file" 2>/dev/null || echo '')")
+            for stale_id in $stale_ids; do
+                gitssh_delete_key "$host" "$url" "$GITS_RESOLVED_TOKEN" "$stale_id"
+            done
         else
             manual=$((manual + 1))
         fi
