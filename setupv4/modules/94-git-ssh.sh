@@ -508,6 +508,28 @@ gitssh_auth_header() {
     fi
 }
 
+# Nennt die passende Token-Berechtigung. Gerade weil GitHub fehlende Rechte
+# hinter 404 versteckt, ist der Hinweis hier das Einzige, was weiterhilft.
+gitssh_hint_scope() {
+    local host="$1"
+    echo ""
+    echo -e "  ${host} benötigt am Token:"
+    if [ "$host" = "github.com" ]; then
+        echo "    admin:public_key  (\"Full control of user public keys\")"
+        echo ""
+        echo "  ACHTUNG: Nicht 'write:admin:ssh_signing_key' vergeben - das gilt"
+        echo "  fuer Signier-Keys (Commit-Signaturen), nicht fuer Anmelde-Keys."
+        echo "  Ein Token mit nur diesem Scope liefert bei /user/keys HTTP 404."
+    else
+        echo "    fine-grained: Kategorie \"user\" auf \"Lesen und Schreiben\""
+        echo "    klassisch:     Scope \"write:user\""
+        echo ""
+        echo "  Der Authorization-Header muss 'Authorization: token <token>' sein,"
+        echo "  Forgejo verlangt das Wort 'token' davor."
+    fi
+    echo ""
+}
+
 # Registriert den öffentlichen Key per API beim Dienst.
 #
 # WICHTIG: curl wird hier bewusst direkt aufgerufen und NICHT über run_eval.
@@ -561,6 +583,17 @@ gitssh_upload_key_via_api() {
             ;;
         401|403)
             error "Token für $host abgelehnt (HTTP $code) - Berechtigung oder Token falsch."
+            gitssh_hint_scope "$host"
+            body=$(head -c 200 "$response_file" 2>/dev/null)
+            debug "Antwort: $body"
+            rm -f "$response_file"
+            return 1
+            ;;
+        404)
+            # GitHub verbirgt fehlende Berechtigungen hinter 404 statt 403.
+            # Ein gueltiger Token ohne public_key-Scope landet hier.
+            error "HTTP 404 von $host - der Token hat sehr wahrscheinlich die falsche Berechtigung."
+            gitssh_hint_scope "$host"
             body=$(head -c 200 "$response_file" 2>/dev/null)
             debug "Antwort: $body"
             rm -f "$response_file"
