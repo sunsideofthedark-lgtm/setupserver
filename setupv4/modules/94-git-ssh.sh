@@ -576,10 +576,28 @@ gitssh_upload_key_via_api() {
             return 0
             ;;
         422)
-            # Key existiert bereits - unkritisch
-            success "Key bei $host bereits registriert"
+            # 422 ist mehrdeutig. Be live getestet liefern GitHub UND Forgejo
+            # bei beiden folgenden Faellen HTTP 422 mit code "custom":
+            #   "key is already in use"                        -> Key ist registriert
+            #   "key is invalid. You must supply a key in ..."  -> Key ist kaputt
+            # Deshalb wird die Meldung ausgewertet statt 422 pauschal als
+            # Erfolg zu werten - sonst wuerde ein ungueltiger Key als Erfolg
+            # gemeldet.
+            body=$(head -c 400 "$response_file" 2>/dev/null)
+            if printf '%s' "$body" | grep -qiE 'already|existiert|in use'; then
+                success "Key bei $host bereits registriert"
+                rm -f "$response_file"
+                return 0
+            fi
+            error "Key bei $host abgelehnt - der oeffentliche Key ist ungueltig."
+            if printf '%s' "$body" | grep -qi 'message'; then
+                local reason
+                reason=$(printf '%s' "$body" | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+                [ -n "$reason" ] && echo "     Grund: $reason"
+            fi
+            debug "Antwort: $body"
             rm -f "$response_file"
-            return 0
+            return 1
             ;;
         401|403)
             error "Token für $host abgelehnt (HTTP $code) - Berechtigung oder Token falsch."
