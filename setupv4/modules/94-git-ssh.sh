@@ -605,16 +605,35 @@ gitssh_find_stale_key_ids() {
 import json, sys
 current = sys.argv[1]
 comment = sys.argv[2]
+
+def key_material(value):
+    """Nur Typ und Base64-Anteil vergleichen.
+
+    Der Teil hinter dem Key ist ein Kommentar ("ssh-ed25519 AAAA... mein-host")
+    und wird von manchen Diensten gar nicht zurueckgegeben. Wurde der ganze
+    String verglichen, gaebe der Dienst einen Key ohne Kommentar zurueck und
+    der gerade benutzte Key wuerde als "fremd" eingestuft und geloescht.
+    """
+    return " ".join(str(value).split()[:2])
+
+if not current.strip():
+    # Ohne bekannten aktuellen Key wird nichts geloescht - im Zweifel halten.
+    sys.exit(0)
+
 try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
+
 if isinstance(data, dict):
     data = [data]
+
+wanted = key_material(current)
+
 for entry in data:
     if not isinstance(entry, dict):
         continue
-    if entry.get("title") == comment and entry.get("key") != current:
+    if entry.get("title") == comment and key_material(entry.get("key", "")) != wanted:
         key_id = entry.get("id")
         if key_id is not None:
             print(key_id)
