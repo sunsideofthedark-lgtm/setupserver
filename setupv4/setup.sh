@@ -314,10 +314,45 @@ if [ $selection_rc -eq 2 ]; then
   Für Automatisierung zusätzlich --non-interactive setzen."
     fi
 
-    echo ""
-    info "Verfügbare Module:"
-    show_module_list
-    select_modules_interactive
+    # --- Hauptmenü ---
+    while true; do
+        show_main_menu
+        printf "  Ihre Wahl [1-4]: " >&2
+        menu_choice=""
+        read -r menu_choice || menu_choice=""
+
+        case "$menu_choice" in
+            1|alle)
+                mapfile -t SELECTED_MODULES < <(
+                    printf '%s\n' "${AVAILABLE_MODULES[@]}" | cut -d'|' -f2
+                )
+                break
+                ;;
+            2)
+                select_modules_interactive
+                break
+                ;;
+            3)
+                # Nur prüfen - der Durchlauf endet nach dem Audit
+                detect_os
+                show_audit
+                exit $?
+                ;;
+            4|beenden|quit|q|exit)
+                skip "Abgebrochen - es wurde nichts geändert."
+                exit 0
+                ;;
+            "")
+                # Bei einfachem Enter die Modular-Auswahl nehmen, das ist
+                # der häufigste Weg und führt nie versehentlich zum Abbruch.
+                select_modules_interactive
+                break
+                ;;
+            *)
+                warning "Ungültige Auswahl. Bitte 1, 2, 3 oder 4 eingeben."
+                ;;
+        esac
+    done
 fi
 
 [ ${#SELECTED_MODULES[@]} -eq 0 ] && fatal "Keine Module zum Ausführen ausgewählt."

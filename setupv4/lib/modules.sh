@@ -170,12 +170,34 @@ show_module_list() {
     done
 }
 
+# --- Hauptmenü ---
+# Aufbau wie im klassischen setupv3.sh, damit der Bedienweg vertraut bleibt.
+# Gibt die gewählte Aktion über stdout aus: 1, 2, 3 oder 4.
+# 4 = beenden.
+show_main_menu() {
+    local module_count=${#AVAILABLE_MODULES[@]}
+
+    echo ""
+    echo -e "${C_CYAN}============================================================${C_RESET}"
+    echo -e "${C_CYAN}  setupv4 - Modulares Server-Setup${C_RESET}"
+    echo -e "${C_CYAN}============================================================${C_RESET}"
+    echo ""
+    echo -e "  ${module_count} Module verfügbar."
+    echo ""
+    echo -e "  ${C_GREEN}1.${C_RESET} Komplettes Setup      alle Module in Ausführungsreihenfolge"
+    echo -e "  ${C_GREEN}2.${C_RESET} Modulare Auswahl    einzelne Schritte selbst wählen"
+    echo -e "  ${C_GREEN}3.${C_RESET} Nur prüfen          Zustand prüfen, nichts ändern (Audit)"
+    echo -e "  ${C_GREEN}4.${C_RESET} Beenden"
+    echo ""
+}
+
 # --- Interaktive Auswahl ---
-# Ermöglicht Einzel- oder Bereichsauswahl wie "1-4,7"
+# listet die Module mit Nummer und Status und wertet eine Bereichseingabe aus.
 select_modules_interactive() {
-    local entry order id name desc
+    local entry order id name desc status
     local index=1
     local list=""
+    local answer
 
     for entry in "${AVAILABLE_MODULES[@]}"; do
         order=$(echo "$entry" | cut -d'|' -f1)
@@ -188,12 +210,18 @@ select_modules_interactive() {
     done
 
     echo ""
-    echo -e "${C_CYAN}Welche Module ausführen? [alle | z. B. 1-4,7 | Enter = alle]:${C_RESET}" >&2
-    local answer
+    echo -e "${C_CYAN}Welche Module ausführen?${C_RESET}" >&2
+    echo -e "${C_CYAN}  alle | keine | Nummern, z. B. 1-4,7 oder einzelne wie 3,9,15${C_RESET}" >&2
+    echo -e "${C_CYAN}  (Enter ohne Eingabe = alle)${C_RESET}" >&2
     read -r answer || answer=""
 
     if [ -z "$answer" ] || [ "$answer" = "alle" ]; then
         SELECTED_MODULES=($list)
+        return 0
+    fi
+
+    if [ "$answer" = "keine" ]; then
+        SELECTED_MODULES=()
         return 0
     fi
 

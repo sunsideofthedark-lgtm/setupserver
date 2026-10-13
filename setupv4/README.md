@@ -57,6 +57,33 @@ sudo bash setup.sh --config config/setup.conf
 sudo /opt/serversetup/setup.sh --status
 ```
 
+### Menü
+
+Start ohne Argumente öffnet ein Menü mit vier Punkten:
+
+```
+  27 Module verfügbar.
+
+  1. Komplettes Setup      alle Module in Ausführungsreihenfolge
+  2. Modulare Auswahl    einzelne Schritte selbst wählen
+  3. Nur prüfen          Zustand prüfen, nichts ändern (Audit)
+  4. Beenden
+```
+
+Bei Punkt 2 wird jedes Modul mit Nummer und Kurzbeschreibung gelistet.
+Auswählbar sind Bereiche und Einzelausgaben:
+
+```
+Welche Module ausführen?
+  alle | keine | Nummern, z. B. 1-4,7 oder einzelne wie 3,9,15
+  (Enter ohne Eingabe = alle)
+
+  > 1-3,15
+```
+
+Ohne Terminal (cron, Ansible, CI) startet das Menü nicht — der Lauf bricht
+dann ab und verweist auf `--modules` bzw. `--non-interactive`, statt zu hängen.
+
 ## Optionen
 
 | Option | Bedeutung |
