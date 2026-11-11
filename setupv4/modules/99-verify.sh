@@ -152,7 +152,9 @@ module_main() {
 
     echo ""
     echo -e "${C_YELLOW}===================================================================${C_RESET}"
-    if reboot_required; then
+    # reboot_required liefert 0 zurück, wenn KEIN Neustart nötig ist -
+    # die Begründung gehört also in den Zweig, in dem ein Neustart nötig ist.
+    if ! reboot_required; then
         echo -e "${C_YELLOW}Ein Neustart ist erforderlich: ${REBOOT_REASONS}${C_RESET}"
         echo -e "${C_YELLOW}(erkannt über ${REBOOT_SOURCE})${C_RESET}"
     else
@@ -177,7 +179,8 @@ module_status() {
 
     ping -c 1 "$VERIFY_TEST_IPV4" >/dev/null 2>&1 && net="online"
     command -v docker >/dev/null 2>&1 && docker="vorhanden"
-    reboot_required && reboot="nötig"
+    # reboot_required liefert 0 zurück, wenn KEIN Neustart nötig ist.
+    reboot_required || reboot="nötig"
 
     echo "Netzwerk ${net}, Docker ${docker}, Reboot ${reboot}"
 }

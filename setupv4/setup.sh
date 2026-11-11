@@ -164,8 +164,19 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# --- Root-Prüfung ---
+# Muss vor der Verlagerung passieren: als normaler Benutzer würde das
+# Script sonst erst an sein Ziel kopieren und dort Dateien mit fremdem
+# Eigentum ablegen - die Fehlermeldung würde dann auf den falschen Pfad
+# zeigen.
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    echo -e "${C_RED}[ERROR] Dieses Script muss als Root ausgeführt werden.${C_RESET}" >&2
+    echo "Verwende: sudo bash $0 ${ORIGINAL_ARGS[*]}" >&2
+    exit 1
+fi
+
 if [ "$DO_RELOCATE" = "1" ]; then
-    relocate_to_setup_home "${ORIGINAL_ARGS[@]}"
+    relocate_to_setup_home "${ORIGINAL_ARGS[@]}" || exit 1
 else
     # Ohne Verlagerung bleibt alles am Aufrufort - sonst würden die
     # Bibliotheken weiterhin unter $SETUP_HOME gesucht und nicht gefunden.
@@ -202,13 +213,6 @@ for lib in core os config modules; do
     }
 done
 
-# --- Root-Prüfung ---
-if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo -e "${C_RED}[ERROR] Dieses Script muss als Root ausgeführt werden.${C_RESET}" >&2
-    echo "Verwende: sudo bash $0 $*" >&2
-    exit 1
-fi
-
 # --- Reboot-Prüfung ---
 # Braucht keine Konfiguration und läuft deshalb vor allem anderen.
 # Exit-Code 1 = Neustart nötig, 0 = nicht nötig. So direkt in eine Prüf-Pipeline
@@ -240,7 +244,9 @@ if [ ${#AVAILABLE_MODULES[@]} -eq 0 ]; then
 fi
 
 if [ -n "$DO_INIT" ]; then
-    config_write_example "$CONFIG_DIR/setup.conf.example"
+    # Der Rückgabewert zählt: config_write_example liefert 1, wenn die Datei
+    # schon existiert und deshalb nichts geschrieben wurde.
+    config_write_example "$CONFIG_DIR/setup.conf.example" || exit 1
     exit 0
 fi
 
@@ -258,8 +264,10 @@ else
     fi
 fi
 
-# Server-Profil (config/servers/<hostname>.conf) überschreibt die Basis-Config
-if [ "$USE_PROFILE" = "1" ] && [ -n "$CONFIG_FILE" ]; then
+# Server-Profil (config/servers/<hostname>.conf) überschreibt die Basis-Config.
+# Das Profil ist unabhängig von einer Basis-Config gültig - deshalb hängt die
+# Bedingung nur an --no-profile und nicht an einer geladenen Config-Datei.
+if [ "$USE_PROFILE" = "1" ]; then
     config_load_host_profile "$SERVERS_CONFIG_DIR"
 fi
 
@@ -364,6 +372,9 @@ fi
 
 # --- Status ---
 if [ -n "$SHOW_STATUS" ]; then
+    # Das OS muss erkannt sein - sonst melden alle OS-abhaengigen Module
+    # "nicht ermittelt".
+    detect_os
     show_module_status
     exit 0
 fi

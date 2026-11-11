@@ -9,5 +9,7 @@ logs/
 config/setup.conf
 config/servers/*.conf
 
-# Von --dry-run und Tests erzeugte Backups
-/var/backups/serversetup/
+# Von --dry-run und Tests erzeugte Backups. Die Sicherungen selbst landen
+# auf dem Zielsystem unter /var/backups/serversetup - im Repository können
+# aber .bak-Dateien entstehen.
+*.bak

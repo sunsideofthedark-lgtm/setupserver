@@ -73,11 +73,24 @@ hostname_apply() {
 
     # /etc/hosts aktualisieren
     debug "Aktualisiere /etc/hosts"
-    run_eval "sed -i 's/127.0.1.1.*${current}/127.0.1.1\\t${new}/' /etc/hosts"
 
-    # Falls keine 127.0.1.1 Zeile existiert, hinzufügen
-    if ! grep -q "127.0.1.1" /etc/hosts 2>/dev/null; then
-        debug "Füge 127.0.1.1 Eintrag zu /etc/hosts hinzu"
+    # Der neue Hostname muss in /etc/hosts stehen. Geprüft wird deshalb auf
+    # den Hostnamen selbst - eine 127.0.1.1-Zeile, die einen anderen Namen
+    # trägt (z. B. "localhost" oder den alten Hostnamen), löst den Server
+    # nicht unter dem neuen Namen auf.
+    if grep -qE "(^|[[:space:]])${new}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
+        # Die Zeile gibt es schon - sie wird durch den kanonischen Eintrag
+        # 127.0.1.1 ersetzt.
+        debug "Ersetze vorhandene Zeile für '$new' in /etc/hosts"
+        run_eval "sed -i -E 's|^[^#]*[[:space:]]+${new}([[:space:]].*)?\$|127.0.1.1\\t${new}|' /etc/hosts"
+    elif grep -qE "^([^#]*[[:space:]])?127\.0\.1\.1([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
+        # Die 127.0.1.1-Zeile trägt noch einen anderen Namen - sie wird
+        # durch den neuen Hostnamen ersetzt.
+        debug "Ersetze 127.0.1.1-Zeile durch '$new' in /etc/hosts"
+        run_eval "sed -i -E 's|^([^#]*[[:space:]])?127\.0\.1\.1([[:space:]].*)?\$|127.0.1.1\\t${new}|' /etc/hosts"
+    else
+        # Kein passender Eintrag vorhanden - Zeile ergänzen.
+        debug "Ergänze Eintrag für '$new' in /etc/hosts"
         run_eval "echo '127.0.1.1 $new' >> /etc/hosts"
     fi
 

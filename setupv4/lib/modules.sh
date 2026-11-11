@@ -140,7 +140,7 @@ list_module_ids() {
 
 module_field() {
     local module_id="$1"
-    local field_index="$2"   # 1=id 2=name 3=desc 4=order 5=file
+    local field_index="$2"   # 1=order 2=id 3=name 4=desc 5=file
     local entry
     [ ${#AVAILABLE_MODULES[@]} -gt 0 ] || return 1
     for entry in "${AVAILABLE_MODULES[@]}"; do
@@ -265,6 +265,13 @@ load_module() {
     fi
 
     debug "Lade Modul: $file"
+
+    # Die Auswertungsfunktionen des vorigen Moduls entfernen. Ohne das erbt
+    # das nächste Modul dessen module_status/module_audit und würde mit
+    # dessen Zustand bewertet - ein Modul ohne eigenes module_audit zeigte
+    # sonst z. B. den Zustand des vorher geladenen Moduls.
+    unset -f module_status module_audit
+
     # shellcheck disable=SC1090
     . "$file" || {
         error "Modul '$module_id' konnte nicht geladen werden."
