@@ -1,0 +1,22 @@
+# Zeilenenden vereinheitlichen: alle Textdateien werden mit LF (Unix) in den
+# Index geschrieben und auch unter Windows mit LF ausgecheckt.
+#
+# Grund: Git for Windows hat core.autocrlf=true voreingestellt. Ohne diese
+# Regel landen die Shell-Skripte unter Windows/WSL mit CRLF im Arbeitsbaum
+# und sind dort nicht lauffaehig - bash meldet dann
+#   "syntax error near unexpected token `$'{\r''".
+# Mit dieser Regel ist der Arbeitsbaum auf jedem System identisch: die
+# Skripte sind unter Linux, unter WSL und unter Git Bash gleich lauffaehig.
+* text=auto eol=lf
+
+# Diese Datei selbst und die Skripte explizit - unabhaengig von der
+# Text-Erkennung.
+*.sh      text eol=lf
+*.conf    text eol=lf
+*.example text eol=lf
+*.yml     text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+
+# Keine Ausnahmen fuer CRLF noetig - das Repo enthaelt keine Batch- oder
+# Windows-spezifischen Dateien.
