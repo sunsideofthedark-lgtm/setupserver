@@ -3,9 +3,11 @@
 # Modul: fail2ban
 # ==============================================================================
 # Installiert Fail2Ban und aktiviert den Schutz gegen SSH-Bruteforce-Angriffe.
-# Der Jail-Block wird in die jail.local geschrieben, die aus der mitgelieferten
-# jail.conf erzeugt wird - alle anderen, von Fail2Ban mitgebrachten Jails
-# bleiben dadurch erhalten.
+# Der Jail-Block steht in einer eigenen Datei unter /etc/fail2ban/jail.d/.
+# Nicht in der jail.local: Fail2Bans Parser ist strikt und verweigert doppelte
+# Sektionen - die jail.local entsteht als Kopie der jail.conf, ein dort
+# angehängter [sshd]-Block wäre ein zweiter [sshd]-Abschnitt und die Jails
+# würden gar nicht erst geladen.
 #
 # Config:
 #   INSTALL_FAIL2BAN - Fail2Ban installieren/konfigurieren (Default false)
@@ -20,27 +22,33 @@ MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit")
 
 F2B_JAIL_CONF="/etc/fail2ban/jail.conf"
+# Standardpfad von Fail2Ban - wird nicht mehr beschrieben, der Jail steht
+# in der eigenen Datei unter jail.d/.
 F2B_JAIL_LOCAL="/etc/fail2ban/jail.local"
+F2B_JAIL_D_DIR="/etc/fail2ban/jail.d"
+F2B_SSHD_JAIL_FILE="/etc/fail2ban/jail.d/99-sshd.local"
 
-# Schreibt den SSH-Jail nach jail.local.
+# Schreibt den SSH-Jail in die eigene Datei unter jail.d/.
 f2b_write_sshd_jail() {
     local ssh_port="$1"
 
     if [ "$DRY_RUN" = "1" ]; then
-        echo -e "${C_MAGENTA}[DRY-RUN] würde schreiben: ${F2B_JAIL_LOCAL}${C_RESET}" >&2
+        echo -e "${C_MAGENTA}[DRY-RUN] würde schreiben: ${F2B_SSHD_JAIL_FILE}${C_RESET}" >&2
         echo "             Inhalt: [sshd] enabled=true port=${ssh_port} maxretry=3 bantime=3600" >&2
         return 0
     fi
 
-    # Die jail.local ist eine Systemdatei und kann eigene Anpassungen enthalten
-    create_backup "$F2B_JAIL_LOCAL"
-
-    if ! cp "$F2B_JAIL_CONF" "$F2B_JAIL_LOCAL"; then
-        error "jail.conf konnte nicht nach jail.local kopiert werden."
+    # Das Verzeichnis jail.d gibt es nicht in jeder Fail2Ban-Installation
+    if ! mkdir -p "$F2B_JAIL_D_DIR"; then
+        error "Verzeichnis ${F2B_JAIL_D_DIR} konnte nicht angelegt werden."
         return 1
     fi
 
-    cat >> "$F2B_JAIL_LOCAL" << EOF
+    # Die eigene Datei ist eine Systemdatei und kann eigene Anpassungen
+    # enthalten - deshalb vor dem Überschreiben sichern.
+    create_backup "$F2B_SSHD_JAIL_FILE"
+
+    cat > "$F2B_SSHD_JAIL_FILE" << EOF
 [sshd]
 enabled = true
 port = ${ssh_port}
@@ -104,22 +112,24 @@ module_main() {
 module_status() {
     local jail_port="-"
 
-    if ! command -v fail2ban-server >/dev/null 2>&1 && [ ! -f "$F2B_JAIL_LOCAL" ]; then
+    if ! command -v fail2ban-server >/dev/null 2>&1 && [ ! -f "$F2B_SSHD_JAIL_FILE" ]; then
         echo "nicht installiert"
         return 0
     fi
 
-    # Den im Jail hinterlegten Port ausgeben, falls ermittelbar
-    if [ -f "$F2B_JAIL_LOCAL" ]; then
+    # Den im Jail hinterlegten Port ausgeben, falls ermittelbar. Gelesen wird
+    # aus der eigenen Datei - in der jail.conf steht "port = ssh", das ist der
+    # Wert der Distribution und nicht der hier konfigurierte Port.
+    if [ -f "$F2B_SSHD_JAIL_FILE" ]; then
         jail_port="$(awk '/^\[sshd\]/{f=1;next} /^\[/{f=0} f&&/^port/{print $3;exit}' \
-            "$F2B_JAIL_LOCAL" 2>/dev/null)"
+            "$F2B_SSHD_JAIL_FILE" 2>/dev/null)"
         [ -z "$jail_port" ] && jail_port="-"
     fi
 
     echo "installiert, sshd-Jail auf Port ${jail_port}"
 }
 
-# Ziel: Fail2Ban ist installiert und der sshd-Jail in der jail.local aktiviert.
+# Ziel: Fail2Ban ist installiert und der sshd-Jail in der jail.d-Datei aktiviert.
 module_audit() {
     local jail_port
 
@@ -133,15 +143,15 @@ module_audit() {
         return 0
     fi
 
-    if [ ! -f "$F2B_JAIL_LOCAL" ]; then
-        echo "abweichung|$F2B_JAIL_LOCAL fehlt|Fail2Ban mit aktivem sshd-Jail"
+    if [ ! -f "$F2B_SSHD_JAIL_FILE" ]; then
+        echo "abweichung|$F2B_SSHD_JAIL_FILE fehlt|Fail2Ban mit aktivem sshd-Jail"
         return 0
     fi
 
     jail_port="$(awk '/^\[sshd\]/{f=1;next} /^\[/{f=0} f&&/^port/{print $3;exit}' \
-        "$F2B_JAIL_LOCAL" 2>/dev/null)"
+        "$F2B_SSHD_JAIL_FILE" 2>/dev/null)"
 
-    if ! awk '/^\[sshd\]/{f=1;next} /^\[/{f=0} f' "$F2B_JAIL_LOCAL" 2>/dev/null \
+    if ! awk '/^\[sshd\]/{f=1;next} /^\[/{f=0} f' "$F2B_SSHD_JAIL_FILE" 2>/dev/null \
         | grep -qiE '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true'; then
         echo "abweichung|sshd-Jail fehlt oder ist nicht aktiviert|Fail2Ban mit aktivem sshd-Jail"
         return 0

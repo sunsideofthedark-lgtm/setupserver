@@ -29,6 +29,10 @@ MODULE_ORDER=86
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("netzwerk" "vpn" "software")
 
+# Management-URL von NetBird Cloud - der Standard des netbird-CLI. Wird
+# verwendet, wenn keine eigene Management-URL angegeben ist.
+NB_MGMT_CLOUD_URL="https://api.netbird.io"
+
 # Liefert die IPv4-Adresse des NetBird-Interfaces wt0. Erst wird das Interface
 # selbst abgefragt, danach wird der Status als Rückfalloption geparst.
 # Nur die erste passende Zeile: netbird status liefert je nach Version
@@ -92,10 +96,19 @@ netbird_install() {
 
 # Fragt Management-URL und Setup-Key ab - Config hat Vorrang.
 netbird_ask_credentials() {
-    # Management-URL
+    # Management-URL - die Config hat Vorrang vor der Nachfrage
+    NB_MGMT_URL="${NB_MGMT_URL:-$(config_get NETBIRD_MGMT_URL)}"
     if [ -z "$NB_MGMT_URL" ]; then
-        # Enter ohne Eingabe = NetBird Cloud
-        ask_value "NetBird Management-URL (Enter für NetBird Cloud)" "" NB_MGMT_URL || return 1
+        # Enter ohne Eingabe = NetBird Cloud. Ein leerer Default würde in
+        # ask_value mit "Kein Wert" abbrechen - deshalb wird hier direkt die
+        # Cloud-URL als Default gesetzt bzw. im nicht-interaktiven Modus
+        # übernommen.
+        if [ "$NON_INTERACTIVE" = "1" ]; then
+            NB_MGMT_URL="$NB_MGMT_CLOUD_URL"
+            debug "netbird (nicht-interaktiv): NB_MGMT_URL = ${NB_MGMT_URL}"
+        else
+            ask_value "NetBird Management-URL (Enter für NetBird Cloud)" "$NB_MGMT_CLOUD_URL" NB_MGMT_URL || return 1
+        fi
     fi
 
     if [ -n "$NB_MGMT_URL" ] && [[ ! "$NB_MGMT_URL" =~ ^https?:// ]]; then

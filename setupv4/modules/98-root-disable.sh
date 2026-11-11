@@ -12,7 +12,8 @@
 # sein. Wer sich hier aussperrt, kommt nur noch über die Konsole zurück.
 #
 # SICHERHEIT: Die sudoers-Datei wird vor dem Schreiben gesichert, mit
-# 'visudo -c' geprüft und bei einem Syntaxfehler sofort wieder entfernt.
+# 'visudo -c' geprüft und bei einem Syntaxfehler aus der Sicherung
+# zurückgerollt.
 #
 # Config:
 #   DISABLE_ROOT_LOGIN - Root-Login deaktivieren (Default true)
@@ -58,13 +59,43 @@ EOF
 
     # Sudoers-Syntax für diese spezifische Datei prüfen
     if command -v visudo >/dev/null 2>&1 && ! visudo -c -f "$ROOTDIS_SECURITY_FILE" >/dev/null 2>&1; then
-        error "Sudoers-Syntaxprüfung nach Schreiben von ${ROOTDIS_SECURITY_FILE} fehlerhaft! Entferne Konfiguration..."
-        rm -f "$ROOTDIS_SECURITY_FILE"
+        error "Sudoers-Syntaxprüfung nach Schreiben von ${ROOTDIS_SECURITY_FILE} fehlerhaft! Konfiguration wird zurückgerollt..."
+        # Nicht einfach löschen: eine zuvor gültige Datei mit gleichem Namen
+        # wäre damit endgültig weg. Stattdessen die letzte Sicherung zurück.
+        if ! rootdis_restore_security_sudoers; then
+            rm -f "$ROOTDIS_SECURITY_FILE"
+            warning "Keine Sicherung vorhanden - die fehlerhafte Datei wurde entfernt."
+        fi
         return 1
     fi
 
     debug "Sudoers-Sicherheitskonfiguration geschrieben: $ROOTDIS_SECURITY_FILE"
     return 0
+}
+
+# Stellt die letzte Sicherung der sudoers-Datei wieder her. create_backup legt
+# sie als "<BACKUP_DIR>/<pfad mit _>.<timestamp>.bak" ab. Gibt es keine
+# Sicherung, wird nichts wiederhergestellt - dann muss die fehlerhafte Datei
+# entfernt werden, damit keine kaputte sudoers-Konfiguration liegen bleibt.
+rootdis_restore_security_sudoers() {
+    local backup_dir="${BACKUP_DIR:-/var/backups/serversetup}"
+    local prefix newest
+
+    prefix="$(echo "$ROOTDIS_SECURITY_FILE" | tr '/' '_')"
+    newest="$(ls -1t "$backup_dir"/${prefix}.*.bak 2>/dev/null | head -n1)"
+
+    if [ -z "$newest" ]; then
+        debug "Keine Sicherung für $ROOTDIS_SECURITY_FILE unter $backup_dir gefunden."
+        return 1
+    fi
+
+    if cp -p "$newest" "$ROOTDIS_SECURITY_FILE" 2>/dev/null; then
+        success "Sudoers-Datei aus $newest wiederhergestellt."
+        return 0
+    fi
+
+    error "Wiederherstellung der Sudoers-Datei fehlgeschlagen!"
+    return 1
 }
 
 module_main() {
@@ -100,9 +131,12 @@ module_main() {
     fi
     success "✅ Erweiterte sudo-Sicherheit konfiguriert"
 
-    # --- Root-Passwort entfernen ---
-    debug "Entferne Root-Passwort"
-    run_cmd passwd -d root
+    # --- Root-Passwort bewusst NICHT leeren ---
+    # "usermod --lock" stellt dem Passwort-Hash ein "!" vor und sperrt den
+    # Account damit vollständig. Ein leeres Passwortfeld wäre auf Ubuntu
+    # (pam_unix.so nullok) ein Einfallstor: "su root" ginge dann ohne
+    # Passwort. Das Lock von usermod genügt also aus.
+    debug "Root-Account ist gesperrt - der Passwort-Hash bleibt unverändert."
 
     # --- SSH-Konfiguration validieren ---
     info "Validiere SSH-Konfiguration..."

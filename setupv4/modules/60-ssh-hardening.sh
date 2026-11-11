@@ -276,11 +276,13 @@ module_main() {
             user_list="${user_list:+$user_list,}$user_name"
         done
 
-        # Den Zielbenutzer zwingend mit aufnehmen - Lockout verhindern
-        if [ -n "$target_user" ]; then
+        # Den Admin-Benutzer zwingend mit aufnehmen - Lockout verhindern.
+        # AllowGroups und AllowUsers wirken gemeinsam (UND): ohne den
+        # Admin-Benutzer in der Liste waere der einzige SSH-Zugang weg.
+        if [ -n "$login_user" ]; then
             case ",$user_list," in
-                *",$target_user,"*) ;;
-                *) user_list="${user_list:+$user_list,}$target_user" ;;
+                *",$login_user,"*) ;;
+                *) user_list="${user_list:+$user_list,}$login_user" ;;
             esac
         fi
 
@@ -337,6 +339,11 @@ module_main() {
     if [ $validate_rc -eq 1 ]; then
         error "Die neue SSH-Konfiguration ist fehlerhaft - der Dienst wird NICHT neu gestartet."
         ssh_restore_config "$config"
+        # Nach dem Rollback lauscht sshd wieder auf dem alten Port. Ohne dieses
+        # Zuruecksetzen wuerde das Firewall-Modul den neuen Port oeffnen und den
+        # alten sperren - SSH waere dann tot.
+        SSH_PORT="$(ssh_current_port)"
+        export SSH_PORT
         return 2
     elif [ $validate_rc -eq 2 ]; then
         warning "Konfiguration konnte nicht geprüft werden - der Neustart wird trotzdem versucht."
@@ -352,6 +359,11 @@ module_main() {
         ssh_restore_config "$config"
         manage_service restart "$SSH_SERVICE" >/dev/null 2>&1
         error "Die alte SSH-Konfiguration wurde wiederhergestellt."
+        # Nach dem Rollback lauscht sshd wieder auf dem alten Port. Ohne dieses
+        # Zuruecksetzen wuerde das Firewall-Modul den neuen Port oeffnen und den
+        # alten sperren - SSH waere dann tot.
+        SSH_PORT="$(ssh_current_port)"
+        export SSH_PORT
         return 2
     fi
 
