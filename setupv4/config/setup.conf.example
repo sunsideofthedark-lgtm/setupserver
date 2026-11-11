@@ -22,6 +22,7 @@ MODULES=(
     sftp-sudoers
     ssh-hardening
     firewall
+    docker-firewall
     docker
     zfs-arc
     nodejs
@@ -76,6 +77,13 @@ FIREWALL_OPEN_WEB_PORTS=true
 FIREWALL_HOSTS_PANGOLIN=false
 FIREWALL_HOSTS_KOMODO=false
 FIREWALL_EXTRA_PORTS=""       # z. B. "51820/udp,21820/udp"
+# Docker-veroeffentlichte Ports laufen ueber die FORWARD-Kette, nicht ueber
+# INPUT - die ufw-Regeln greifen fuer sie NICHT. Das Audit-Modul
+# "docker-firewall" vergleicht die veroeffentlichten Ports mit der Firewall.
+FIREWALL_DOCKER_AUDIT=true    # Abweichungen immer melden
+FIREWALL_DOCKER_USER=false     # DOCKER-USER-Regeln setzen (nur iptables-Backend!)
+FIREWALL_DOCKER_PORTS=""       # Ports, die trotz Docker offen bleiben duerfen
+FIREWALL_DOCKER_EXT_IF="eth0"  # externes Interface fuer die DOCKER-USER-Regeln
 
 # --- Software ---
 INSTALL_DOCKER=true

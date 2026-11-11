@@ -115,6 +115,26 @@ fw_configure_ufw() {
         info "Firewall: Zusatzports freigegeben ($(config_get FIREWALL_EXTRA_PORTS))."
     fi
 
+    # --- IPv6 wirksam machen ---
+    # Das Setzen von IPV6=yes in /etc/default/ufw wirkt sich erst auf die
+    # REGELN aus, die ufw neu schreibt. Bereits vorhandene Regeln bleiben
+    # IPv4-only, bis ufw die Ruleset neu anwendet. Ohne dieses Reload laeuft
+    # der Server mit einer Firewall, die IPv6 nicht abdeckt - bei
+    # Dual-Stack genau die Haelfe, die niemand erwartet.
+    if [ -f /etc/default/ufw ] && grep -qE '^IPV6=yes' /etc/default/ufw 2>/dev/null; then
+        info "Wende Firewall-Regeln neu an (IPv4 und IPv6)..."
+        run_eval "ufw --force reload"
+        if command -v ufw >/dev/null 2>&1 && [ "$DRY_RUN" != "1" ]; then
+            local v6_rules
+            v6_rules="$(ufw status 2>/dev/null | grep -c 'v6\.\|::\)' || true)"
+            if [ "${v6_rules:-0}" -gt 0 ]; then
+                success "Firewall deckt IPv6 ab ($v6_rules IPv6-Regeln)."
+            else
+                warning "Keine IPv6-Regeln in der Firewall gefunden - bitte 'ufw status verbose' prüfen."
+            fi
+        fi
+    fi
+
     run_eval "ufw --force enable"
     return 0
 }

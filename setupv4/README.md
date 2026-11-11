@@ -172,6 +172,7 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 55 | `sftp-sudoers` | SFTP-Sudoers-Regel | `SFTP_SUDOERS`, `ADMIN_USER` |
 | 60 | `ssh-hardening` | SSH-Härtung | `SSH_PORT`, `DISABLE_ROOT_LOGIN`, `SSH_ALLOWED_USERS` |
 | 70 | `firewall` | Firewall | `FIREWALL_OPEN_WEB_PORTS`, `FIREWALL_EXTRA_PORTS`, … |
+| 71 | `docker-firewall` | Docker-Port-Audit | `FIREWALL_DOCKER_USER`, `FIREWALL_DOCKER_PORTS` |
 | 80 | `docker` | Docker + `daemon.json` | `INSTALL_DOCKER` |
 | 82 | `zfs-arc` | ZFS ARC-Cache | `INSTALL_ZFS_ARC` |
 | 84 | `nodejs` | Node.js / npm | `INSTALL_NODEJS` |
@@ -241,6 +242,26 @@ noch `/opt/serversetup` an. Es gibt drei Bereiche:
 | `safety` | Dry-Run schreibt nichts, keine Secrets im Log, Idempotenz |
 
 Bei jedem Push läuft die Suite in der CI (`.github/workflows/setup.yml`).
+
+---
+
+## Docker und die Firewall
+
+Eine von Docker veröffentlichte Port-Weiterleitung läuft über die **FORWARD**-Kette,
+nicht über INPUT. Die ufw-Regeln greifen für sie also nicht — Docker setzt eigene
+Regeln, die vor der Forward-Policy ausgewertet werden.
+
+Docker-Doku: *„By default, any remote host can connect to ports published to the
+Docker host's external addresses."*
+
+Das Modul `docker-firewall` vergleicht deshalb die veröffentlichten Ports mit
+denen, die die Firewall freigibt, und meldet die Abweichungen. Mit
+`FIREWALL_DOCKER_USER=true` setzt es passende Regeln in die `DOCKER-USER`-Kette.
+
+> Die `DOCKER-USER`-Kette wirkt **nur beim iptables-Backend**. Läuft Docker mit
+> nftables, braucht es eine eigene nftables-Tabelle mit einer `forward`-Kette
+> und niedrigerer Priorität — das Modul weist in dem Fall mit einer Fehlermeldung
+> darauf hin, statt wirkungslose Regeln zu schreiben.
 
 ---
 
