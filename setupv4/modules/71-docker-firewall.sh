@@ -35,32 +35,85 @@ MODULE_ORDER=71
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit" "docker" "firewall")
 
-# Ermittelt die von Docker veroeffentlichten Ports als "port/protokoll"-Liste.
-# Beispielausgabe von docker ps: "0.0.0.0:8120->8120/tcp, :::8120->8120/tcp"
+# Ermittelt die von Docker veroeffentlichten Ports.
+#
+# Entscheidend ist, AUF WELCHER Adresse ein Port veroeffentlicht wird:
+#
+#   ports: - "8000:8000"            -> 0.0.0.0 und ::  -> aus dem Internet
+#                                        erreichbar, Firewall (INPUT) greift nicht
+#   ports: - "10.0.0.1:8000:8000"   -> nur auf der NetBird-IP -> aus dem
+#                                        Internet NICHT erreichbar
+#
+# "docker ps" zeigt die Zuordnung als
+#   "0.0.0.0:8000->8000/tcp, :::8000->8000/tcp"     (offen)
+#   "10.0.0.1:8000->8000/tcp"                       (nur NetBird)
+#
+# Rueckgabe: zwei Zeilen, erste die offenen Ports, zweite die an eine
+# bestimmte Adresse gebundenen Ports.
 docker_published_ports() {
-    local line ports=""
-    # Kein Pruefen auf /var/run/docker.sock: Docker laeuft auch mit
-    # DOCKER_HOST, als rootless-Docker oder unter Podman. Entscheidend ist
-    # nur, ob die CLI antwortet.
+    local line exposed="" bound="" mapping rest target
+    local proto container_port host_ip host_port
+
     command -v docker >/dev/null 2>&1 || return 0
     docker info >/dev/null 2>&1 || return 0
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue
-        # Sowohl "0.0.0.0:8120->8120/tcp" als auch ":::8120->8120/tcp"
-        # und "[::]:8120->8120/tcp" erfassen.
-        local mapping
-        for mapping in $(echo "$line" | grep -oE '[0-9]+->[0-9]+/[a-z]+'); do
-            local container_port proto
-            container_port="${mapping%%->*}"
-            proto="${mapping##*/}"
-            container_port="${container_port%%/*}"
-            ports="${ports}${ports:+,}${container_port}/${proto}"
+
+        # Eine Zeile je Container, darin mehrere Zuordnungen durch ", " getrennt:
+        #   "0.0.0.0:8120->8120/tcp, :::8120->8120/tcp"
+        #   "10.0.0.1:8000->8000/tcp"
+        local old_ifs="$IFS"
+        IFS=','
+        local -a mappings=($(echo "$line" | tr ',' '\n'))
+        IFS="$old_ifs"
+
+        for mapping in "${mappings[@]}"; do
+            mapping="$(echo "$mapping" | xargs)"
+            [ -z "$mapping" ] && continue
+            [[ "$mapping" == *">>"* ]] && continue
+
+            # "IP:HOSTPORT->CONTAINERPORT/PROTO" in Teile zerlegen.
+            # Ohne Regex, weil IPv6-Adressen selbst Doppelpunkte enthalten.
+            rest="${mapping%%->*}"        # "0.0.0.0:8120"  bzw.  ":::8120"
+            target="${mapping##*->}"      # "8120/tcp"
+
+            proto="${target##*/}"          # "tcp"
+            container_port="${target%%/*}" # "8120"
+
+            host_port="${rest##*:}"       # letzter Teil = Port
+            host_ip="${rest%:*}"          # Rest = IP
+            host_ip="${host_ip#[}"        # Klammern entfernen
+            host_ip="${host_ip%]}"
+
+            # Alles was nicht auf einer konkreten Adresse lauscht, ist offen.
+            case "$host_ip" in
+                0.0.0.0|""|::)
+                    exposed="${exposed}${exposed:+,}${container_port}/${proto}"
+                    ;;
+                *)
+                    bound="${bound}${bound:+,}${host_ip}:${container_port}/${proto}"
+                    ;;
+            esac
         done
     done < <(docker ps --format '{{.Ports}}' 2>/dev/null)
 
-    # Doppelte Ports (IPv4 und IPv6 fuehren zum selben Port) einmal zaehlen
-    echo "$ports" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -
+    # Deduplizieren (IPv4 und IPv6 fuehren zum selben Port)
+    exposed=$(echo "$exposed" | tr ',' '\n' | awk 'NF && !s[$0]++' | paste -sd, -)
+    bound=$(echo "$bound" | tr ',' '\n' | awk 'NF && !s[$0]++' | paste -sd, -)
+
+    echo "$exposed"
+    echo "$bound"
+}
+
+# Holt beide Portlisten in Globale: offene Ports und an eine Adresse gebundene.
+DOCKER_EXPOSED_PORTS=""
+DOCKER_BOUND_PORTS=""
+docker_collect_ports() {
+    local out
+    out="$(docker_published_ports)"
+    DOCKER_EXPOSED_PORTS="$(echo "$out" | sed -n 1p)"
+    DOCKER_BOUND_PORTS="$(echo "$out" | sed -n 2p)"
 }
 
 # Ports, die laut Firewall-Konfiguration offen sein sollen.
@@ -123,7 +176,10 @@ module_main() {
     fi
 
     published="$(docker_published_ports)"
-    if [ -z "$published" ]; then
+    docker_collect_ports
+    published="$DOCKER_EXPOSED_PORTS"
+
+    if [ -z "$published" ] && [ -z "$DOCKER_BOUND_PORTS" ]; then
         success "Keine Ports von Docker veroeffentlicht - die Firewall greift vollstaendig."
         return 0
     fi
@@ -131,10 +187,18 @@ module_main() {
     allowed="$(fw_allowed_ports)"
     extra="$(config_get FIREWALL_DOCKER_PORTS "")"
 
-    info "Von Docker veroeffentlichte Ports:"
-    for entry in ${published//,/ }; do
-        echo "     ${entry}"
-    done
+    if [ -n "$published" ]; then
+        info "Von Docker auf ALLEN Adressen veroeffentlicht (aus dem Internet erreichbar):"
+        for entry in ${published//,/ }; do
+            echo "     ${entry}"
+        done
+    fi
+    if [ -n "$DOCKER_BOUND_PORTS" ]; then
+        info "An eine bestimmte Adresse gebunden (nur im Mesh erreichbar, unkritisch):"
+        for entry in ${DOCKER_BOUND_PORTS//,/ }; do
+            echo "     ${entry}"
+        done
+    fi
     echo ""
 
     # Welche veroeffentlichten Ports sind nicht durch die Firewall gedeckt?
@@ -202,38 +266,53 @@ module_main() {
 }
 
 module_status() {
-    local published count
-    published="$(docker_published_ports)"
+    local count exposed bound
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "Docker nicht installiert"
         return 0
     fi
 
-    if [ -z "$published" ]; then
+    docker_collect_ports
+    exposed="$DOCKER_EXPOSED_PORTS"
+    bound="$DOCKER_BOUND_PORTS"
+
+    if [ -z "$exposed" ] && [ -z "$bound" ]; then
         echo "keine veroeffentlichten Ports"
         return 0
     fi
 
-    count=$(echo "$published" | tr ',' '\n' | grep -c .)
-    echo "${count} Ports veroeffentlicht, Firewall deckt sie nicht automatisch ab"
+    count=$(echo "$exposed" | tr ',' '\n' | grep -c .)
+    if [ -n "$exposed" ]; then
+        echo "${count} Ports auf allen Adressen offen - Firewall greift dort nicht"
+    else
+        echo "nur an konkrete Adresse gebunden - unkritisch"
+    fi
 }
 
 module_audit() {
-    local published count
-    published="$(docker_published_ports)"
+    local count exposed bound
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "info|Docker nicht installiert|keine Docker-Ports zu pruefen"
         return 0
     fi
 
-    if [ -z "$published" ]; then
+    docker_collect_ports
+    exposed="$DOCKER_EXPOSED_PORTS"
+    bound="$DOCKER_BOUND_PORTS"
+
+    if [ -z "$exposed" ] && [ -z "$bound" ]; then
         echo "ok|keine Docker-Ports veroeffentlicht"
         return 0
     fi
 
-    count=$(echo "$published" | tr ',' '\n' | grep -c .)
-    echo "abweichung|${count} Ports veroeffentlicht|DOCKER-USER-Regeln noetig, sonst umgehen sie die Firewall"
+    if [ -z "$exposed" ]; then
+        echo "ok|nur an konkrete Adresse gebunden - nicht aus dem Internet erreichbar"
+        return 0
+    fi
+
+    count=$(echo "$exposed" | tr ',' '\n' | grep -c .)
+    echo "abweichung|${count} Ports auf allen Adressen offen|DOCKER-USER-Regeln noetig, sonst umgehen sie die Firewall"
     return 0
 }

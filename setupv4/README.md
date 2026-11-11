@@ -263,6 +263,32 @@ denen, die die Firewall freigibt, und meldet die Abweichungen. Mit
 > und niedrigerer Priorität — das Modul weist in dem Fall mit einer Fehlermeldung
 > darauf hin, statt wirkungslose Regeln zu schreiben.
 
+### Die bessere Lösung: an die NetBird-IP binden
+
+Die Firewall-Regeln zu verbiegen ist die Notlösung. Sauberer ist es, den
+Container von vornherein nur an eine interne Adresse zu binden:
+
+```yaml
+# ports: "8000:8000"          -> 0.0.0.0 und ::  -> aus dem Internet erreichbar
+ports:
+  - "10.0.0.1:8000:8000"       # nur auf der NetBird-IP -> nur im Mesh erreichbar
+```
+
+Dann greift die Firewall für diesen Port gar nicht erst, weil der Port aus dem
+Internet gar nicht erreichbar ist. Das Audit-Modul unterscheidet deshalb
+zwischen zwei Sorten und meldet nur die offenen als Abweichung:
+
+```
+Von Docker auf ALLEN Adressen veröffentlicht (aus dem Internet erreichbar):
+     8120/tcp
+An eine bestimmte Adresse gebunden (nur im Mesh erreichbar, unkritisch):
+     10.0.0.1:8000/tcp
+```
+
+Ausnahme: Dienste, die wirklich aus dem Internet erreichbar sein müssen —
+etwa der Pangolin-Newt für deine öffentlichen Domains — bleiben auf allen
+Adressen. Die schützt dann die Anwendung selbst (TLS, Authentifizierung).
+
 ---
 
 ## Ein Modul schreiben
