@@ -230,10 +230,21 @@ users_ask_passphrase() {
     info "Ein Passwort erhöht die Sicherheit, erfordert aber eine Eingabe bei jeder SSH-Verbindung."
     while true; do
         echo -e "${C_CYAN}SSH-Schlüssel Passwort eingeben: ${C_RESET}" >&2
-        read -rs users_passphrase || users_passphrase=""
+        # EOF (Ctrl-D) oder geschlossenes stdin: abbrechen statt endlos
+        # nachzufragen. Ohne diese Pruefung laeuft die Schleife bei leerer
+        # Eingabe unendlich.
+        if ! read -rs users_passphrase; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
         echo "" >&2
         echo -e "${C_CYAN}Passwort bestätigen: ${C_RESET}" >&2
-        read -rs confirm_input || confirm_input=""
+        if ! read -rs confirm_input; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
         echo "" >&2
 
         if [ "$users_passphrase" != "$confirm_input" ]; then
@@ -306,6 +317,17 @@ users_show_ssh_keys() {
     echo ""
 
     warning "WICHTIG: Notieren oder kopieren Sie den privaten Schlüssel JETZT!"
+
+    # Bei umgeleiteter Ausgabe (Pipe, Automation) existiert die einzige
+    # Kopie des privaten Schluessels nur im Pipe-Puffer. Wird er trotzdem
+    # geloescht, bleibt der Admin-Benutzer ohne nutzbaren Schluessel -
+    # deshalb wird ohne Terminal nicht geloescht.
+    if [ ! -t 1 ]; then
+        warning "Ausgabe ist umgeleitet - der private Schlüssel wird deshalb NICHT gelöscht."
+        warning "Bitte den privaten Schlüssel manuell entfernen: $private_key"
+        return 0
+    fi
+
     echo -e "${C_RED}Der private Schlüssel wird nach dieser Anzeige aus Sicherheitsgründen gelöscht!${C_RESET}"
 
     if ! confirm "Haben Sie den privaten Schlüssel gesichert und möchten fortfahren?" "n"; then
@@ -361,7 +383,9 @@ users_setup_ssh_key() {
     fi
 
     debug "Generiere ${key_type}-Schlüsselpaar"
-    users_ask_passphrase
+    # Bricht die Passwortabfrage ab (z. B. EOF), wird kein Schlüssel erzeugt -
+    # sonst entstuende ungefragt ein ungeschuetzter Schluessel.
+    users_ask_passphrase || return 1
 
     if ! run_cmd sudo -u "$user" ssh-keygen -t "$key_type" -f "$home/.ssh/$key_file" -N "$users_passphrase" -C "$user@$(hostname)"; then
         error "SSH-Schlüssel-Generierung fehlgeschlagen"
@@ -418,10 +442,13 @@ users_setup_srv_opt() {
 
     info "Konfiguriere direkte Gruppenberechtigungen für /opt..."
     run_cmd mkdir -p /opt
-    run_cmd chown -R "root:$user" /opt
-    run_cmd chmod -R 2775 /opt
+    # Nur das Verzeichnis selbst anfassen: ein rekursives chmod macht den
+    # Bestand weltlesbar (eine .env mit 0600 wird zu 2775) und setuid-Bits
+    # gehen verloren.
+    run_cmd chown "root:$user" /opt
+    run_cmd chmod 2775 /opt
     if command -v setfacl &>/dev/null; then
-        run_eval "setfacl -R -m g:$user:rwx,d:g:$user:rwx /opt 2>/dev/null || true"
+        run_eval "setfacl -m g:$user:rwx,d:g:$user:rwx /opt 2>/dev/null || true"
     fi
 
     # Alte/fehlerhafte sudoers-Dateien aufräumen, um Sudo-Parserfehler zu beheben
@@ -512,12 +539,24 @@ users_create_new() {
     return 0
 }
 
-# Zweig "Benutzer existiert bereits": kein neuer Schlüssel, keine sudo-Gruppe,
-# aber remotessh und die Verzeichnisberechtigungen werden gesetzt.
+# Zweig "Benutzer existiert bereits": kein neuer Schlüssel, aber Admin-Gruppe,
+# remotessh und die Verzeichnisberechtigungen werden gesetzt.
 users_use_existing() {
     local user="$1"
+    local admin_group
 
     users_ensure_remotessh_group || return 2
+
+    # Zur entsprechenden Admin-Gruppe hinzufügen (je nach Distribution) - genau
+    # wie im Zweig "neu". Ohne das bleibt der Benutzer ohne sudo-Rechte und
+    # der Audit meldet eine Abweichung.
+    admin_group="$(users_admin_group)"
+
+    debug "Füge existierenden Benutzer zur $admin_group-Gruppe hinzu"
+    if ! run_cmd usermod -aG "$admin_group" "$user"; then
+        error "Hinzufügung zur $admin_group-Gruppe fehlgeschlagen"
+        return 2
+    fi
 
     # Bestehenden Benutzer zur remotessh-Gruppe hinzufügen
     debug "Füge existierenden Benutzer zur remotessh-Gruppe hinzu"
@@ -526,17 +565,17 @@ users_use_existing() {
         return 2
     fi
 
-    success "Benutzer '$user' wurde zur 'remotessh'-Gruppe hinzugefügt."
+    success "Benutzer '$user' wurde zu den Gruppen '$admin_group' und 'remotessh' hinzugefügt."
 
     # Direktzugriff auf /srv und /opt für bestehenden Benutzer konfigurieren
     info "Konfiguriere direkte Gruppenberechtigungen für /srv und /opt..."
     run_cmd mkdir -p /srv /opt
     run_cmd chown "root:$user" /srv
     run_cmd chmod 2775 /srv
-    run_cmd chown -R "root:$user" /opt
-    run_cmd chmod -R 2775 /opt
+    run_cmd chown "root:$user" /opt
+    run_cmd chmod 2775 /opt
     if command -v setfacl &>/dev/null; then
-        run_eval "setfacl -R -m g:$user:rwx,d:g:$user:rwx /opt 2>/dev/null || true"
+        run_eval "setfacl -m g:$user:rwx,d:g:$user:rwx /opt 2>/dev/null || true"
     fi
     success "✅ Berechtigungen für '/srv' und '/opt' für Benutzer '$user' konfiguriert."
     return 0
@@ -561,7 +600,12 @@ users_ask_dbbackup_key() {
         fi
 
         echo -e "${C_CYAN}Bitte kopieren Sie den SSH Public Key für '$user' (z.B. ssh-ed25519 AAA...):${C_RESET}" >&2
-        read -r key || key=""
+        # EOF (Ctrl-D) oder geschlossenes stdin: abbrechen statt endlos
+        # nachzufragen. Ohne diese Pruefung laeuft die Schleife endlos.
+        if ! read -r key; then
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
 
         if [ -z "$key" ]; then
             warning "Der SSH Public Key darf nicht leer sein."
@@ -579,7 +623,7 @@ users_ask_dbbackup_key() {
 }
 
 users_setup_backup_user() {
-    local db_user db_home db_key auth_keys
+    local db_user db_home db_key auth_keys keep_existing
 
     db_user="$(config_get DB_BACKUP_USER dbbackup)"
     echo ""
@@ -643,7 +687,25 @@ users_setup_backup_user() {
         echo "     Inhalt: <öffentlicher Schlüssel von '$db_user'>" >&2
     else
         create_backup "$auth_keys"
-        printf '%s\n' "$users_db_key" > "$auth_keys"
+
+        # Ein bereits hinterlegter Schlüssel darf nicht ungefragt verloren
+        # gehen: authorized_keys ist ein Mehrfachformat. Der Operator
+        # entscheidet, ob der alte Eintrag erhalten bleibt.
+        keep_existing=0
+        if [ -s "$auth_keys" ]; then
+            warning "Für '$db_user' ist bereits ein SSH-Schlüssel hinterlegt."
+            if ask_yes_no "Soll der bestehende Schlüssel behalten und der neue Schlüssel angehängt werden?" "y"; then
+                keep_existing=1
+            else
+                warning "Der bestehende Schlüssel wird durch den neuen ersetzt."
+            fi
+        fi
+
+        if [ "$keep_existing" = "1" ]; then
+            printf '%s\n' "$users_db_key" >> "$auth_keys"
+        else
+            printf '%s\n' "$users_db_key" > "$auth_keys"
+        fi
         run_cmd chmod 600 "$auth_keys"
         run_cmd chown "$db_user:$db_user" "$auth_keys"
     fi
@@ -765,17 +827,19 @@ users_setup_shared_dir() {
 
     # 1. Eigentümer auf root und Gruppe auf $shared_group setzen
     info "Setze Eigentümer von $shared_dir auf root:$shared_group..."
-    run_cmd chown -R "root:$shared_group" "$shared_dir"
+    # Nur das Verzeichnis selbst: ein rekursives chmod 2775 macht den
+    # Bestand weltlesbar und setuid-Bits gehen verloren.
+    run_cmd chown "root:$shared_group" "$shared_dir"
 
     # 2. Schreib- und Leserechte für den Eigentümer (root) und die Gruppe geben,
     #    SGID-Bit setzen (chmod 2775 oder g+s)
     info "Konfiguriere Berechtigungen (Mode 2775 / SGID) für $shared_dir..."
-    run_cmd chmod -R 2775 "$shared_dir"
+    run_cmd chmod 2775 "$shared_dir"
 
     # Falls setfacl vorhanden, Standard-ACLs setzen
     if command -v setfacl &>/dev/null; then
         debug "Konfiguriere ACLs für $shared_dir"
-        run_eval "setfacl -R -m g:$shared_group:rwx,d:g:$shared_group:rwx '$shared_dir' 2>/dev/null || true"
+        run_eval "setfacl -m g:$shared_group:rwx,d:g:$shared_group:rwx '$shared_dir' 2>/dev/null || true"
     fi
 
     success "✅ Geteiltes Verzeichnis '$shared_dir' wurde für die Gruppe '$shared_group' konfiguriert."

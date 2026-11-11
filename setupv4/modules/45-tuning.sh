@@ -197,7 +197,7 @@ tuning_swap_size_mb() {
         half=$((ram_mb / 2))
         [ "$half" -lt 1024 ] && half=1024
         if [ "$wanted" -gt "$half" ]; then
-            warning "TUNING_SWAP_SIZE ($wantedMB) ist groesser als die Haelfte des RAM - verwende ${half}MB."
+            warning "TUNING_SWAP_SIZE (${wanted}MB) ist groesser als die Haelfte des RAM - verwende ${half}MB."
             wanted="$half"
         fi
     fi
@@ -211,7 +211,10 @@ tuning_apply_swap() {
     if swapon --show 2>/dev/null | grep -q .; then
         info "Swap bereits vorhanden - keine Aktion."
         debug "$(swapon --show 2>/dev/null | tr '\n' ';')"
-        return 1
+        # Der Zielzustand (Swap ist aktiv) ist damit bereits erfuellt. Das
+        # wird als Erfolg gewertet - sonst meldet module_main nur "2 von 3
+        # Teilen eingerichtet", obwohl der Swap-Zielzustand stimmt.
+        return 0
     fi
 
     size_mb="$(tuning_swap_size_mb)"
@@ -223,6 +226,12 @@ tuning_apply_swap() {
     elif command -v fallocate >/dev/null 2>&1; then
         if run_cmd fallocate -l "$size_arg" "$TUNING_SWAP_FILE"; then
             created=1
+        else
+            # fallocate legt die Datei an und meldet danach EOPNOTSUPP
+            # (z. B. auf btrfs/XFS). Die 0-Byte-Datei muss wieder entfernt
+            # werden, sonst greift der dd-Rueckfall darunter nicht.
+            warning "fallocate konnte die Swapdatei nicht anlegen - weiche auf dd aus."
+            run_cmd rm -f "$TUNING_SWAP_FILE"
         fi
     fi
 
@@ -238,7 +247,14 @@ tuning_apply_swap() {
     fi
 
     run_cmd chmod 600 "$TUNING_SWAP_FILE"
-    run_cmd mkswap "$TUNING_SWAP_FILE"
+
+    # Der fstab-Eintrag entsteht erst nach erfolgreichem mkswap. Sonst
+    # bleibt bei btrfs/XFS ein dauerhaft defekter Boot-Eintrag zurueck, der
+    # eine nicht existente bzw. kaputte Swapdatei aktivieren soll.
+    if ! run_cmd mkswap "$TUNING_SWAP_FILE"; then
+        error "Swapdatei $TUNING_SWAP_FILE konnte nicht formatiert werden."
+        return 1
+    fi
 
     # fstab: genau eine Zeile, und nur wenn /swapfile dort noch nicht steht
     if grep -qE "^${TUNING_SWAP_FILE}[[:space:]]" /etc/fstab 2>/dev/null; then

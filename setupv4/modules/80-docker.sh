@@ -45,6 +45,7 @@ docker_os_codename() {
 
 docker_write_daemon_json() {
     local live_restore="$1"
+    local fragment
 
     # Im Dry-Run darf nicht geschrieben werden - sonst würde die echte
     # daemon.json beim Testlauf überschrieben.
@@ -55,7 +56,12 @@ docker_write_daemon_json() {
     fi
 
     mkdir -p /etc/docker
-    cat > "$DOCKER_DAEMON_JSON" << EOF
+
+    # Die Modulwerte als JSON-Fragment. Sie werden mit der vorhandenen Datei
+    # zusammengeführt statt sie zu überschreiben - sonst gingen fremde
+    # Schlüssel (data-root, registry-mirrors, insecure-registries,
+    # default-runtime, log-level ...) verloren.
+    fragment="$(cat << EOF
 {
   "mtu": ${DOCKER_MTU},
   "live-restore": ${live_restore},
@@ -80,8 +86,64 @@ docker_write_daemon_json() {
   ]
 }
 EOF
+)"
 
-    return 0
+    # Ohne python3 lässt sich die vorhandene Datei nicht parsen. Sie wird
+    # dann nicht ungefragt überschrieben - der Benutzer entscheidet.
+    if ! command -v python3 >/dev/null 2>&1; then
+        if [ -s "$DOCKER_DAEMON_JSON" ]; then
+            warning "python3 ist nicht installiert - '$DOCKER_DAEMON_JSON' kann nicht zusammengeführt werden."
+            if ! ask_yes_no "Soll '$DOCKER_DAEMON_JSON' trotzdem durch die Modulwerte ersetzt werden?" "n"; then
+                info "'$DOCKER_DAEMON_JSON' bleibt unverändert."
+                return 0
+            fi
+        fi
+        printf '%s\n' "$fragment" > "$DOCKER_DAEMON_JSON"
+        return 0
+    fi
+
+    if DOCKER_JSON_FRAGMENT="$fragment" python3 - "$DOCKER_DAEMON_JSON" << 'DOCKERPYEOF'
+import json, os, shutil, sys
+
+path = sys.argv[1]
+
+try:
+    with open(path) as f:
+        data = json.load(f)
+except FileNotFoundError:
+    data = {}
+except json.JSONDecodeError as e:
+    print(f"FEHLER: {path} enthaelt kein gueltiges JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(data, dict):
+    print("FEHLER: unerwarteter Aufbau in daemon.json", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    fragment = json.loads(os.environ["DOCKER_JSON_FRAGMENT"])
+except (KeyError, json.JSONDecodeError) as e:
+    print(f"FEHLER: Modulwerte sind kein gueltiges JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+
+# Die Modulwerte gewinnen bei den von ihnen verwalteten Schluesseln - alle
+# anderen vorhandenen Schluessel bleiben erhalten.
+data.update(fragment)
+
+tmp = path + ".docker-tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.chmod(tmp, 0o644)
+shutil.move(tmp, path)
+DOCKERPYEOF
+    then
+        debug "Bestehende Einstellungen in '$DOCKER_DAEMON_JSON' wurden erhalten."
+        return 0
+    fi
+
+    error "Aktualisierung von '$DOCKER_DAEMON_JSON' fehlgeschlagen."
+    return 1
 }
 
 docker_configure_ufw() {
@@ -209,32 +271,35 @@ module_main() {
         else
             debug "IPv6 in Docker nicht aktiviert"
         fi
-        return 0
+        # Nur die Installation selbst wird übersprungen - die Konfiguration
+        # (daemon.json) und die ufw-Integration laufen auch hier. Sonst
+        # bliebe /etc/default/ufw auf DEFAULT_FORWARD_POLICY="DROP", obwohl
+        # genau das dieses Modul reparieren soll.
+    else
+        info "Installiere Docker und Docker Compose automatisch..."
+        debug "Starte Docker-Installation"
+        log_action "DOCKER" "Starting automatic Docker installation"
+
+        docker_install
+        if [ $? -ne 0 ]; then
+            error "Docker-Installation fehlgeschlagen"
+            log_action "DOCKER" "Docker installation failed"
+            return 2
+        fi
+
+        manage_service enable docker
+        manage_service start docker
+
+        # Docker-Installation verifizieren
+        if ! command -v docker >/dev/null 2>&1; then
+            error "Docker-Installation fehlgeschlagen"
+            log_action "DOCKER" "Docker installation failed"
+            return 2
+        fi
+
+        success "✅ Docker erfolgreich installiert: $(docker --version)"
+        log_action "DOCKER" "Docker installed successfully"
     fi
-
-    info "Installiere Docker und Docker Compose automatisch..."
-    debug "Starte Docker-Installation"
-    log_action "DOCKER" "Starting automatic Docker installation"
-
-    docker_install
-    if [ $? -ne 0 ]; then
-        error "Docker-Installation fehlgeschlagen"
-        log_action "DOCKER" "Docker installation failed"
-        return 2
-    fi
-
-    manage_service enable docker
-    manage_service start docker
-
-    # Docker-Installation verifizieren
-    if ! command -v docker >/dev/null 2>&1; then
-        error "Docker-Installation fehlgeschlagen"
-        log_action "DOCKER" "Docker installation failed"
-        return 2
-    fi
-
-    success "✅ Docker erfolgreich installiert: $(docker --version)"
-    log_action "DOCKER" "Docker installed successfully"
 
     # --- Docker-Konfiguration (daemon.json) ---
     info "Konfiguriere Docker Daemon..."
