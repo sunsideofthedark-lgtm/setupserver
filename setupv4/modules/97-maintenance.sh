@@ -118,7 +118,11 @@ maint_install_cronjob() {
 
     current_cron="$(crontab -l 2>/dev/null || true)"
 
-    if echo "$current_cron" | grep -qF "$MAINT_DISK_SCRIPT"; then
+    # Auf die vollstaendige Job-Zeile matchen, nicht nur auf den Pfad: ein
+    # auskommentierter Eintrag ("#0 2 * * * /usr/local/bin/disk-space-monitor.sh")
+    # enthaelt den Pfad ebenfalls - der Job waere dann nie eingetragen und der
+    # Disk-Monitor liefe nie.
+    if printf '%s\n' "$current_cron" | grep -qxF "$MAINT_DISK_CRON_JOB"; then
         debug "Cronjob für Disk-Space-Monitor existiert bereits."
         return 0
     fi
@@ -184,7 +188,7 @@ module_status() {
     [ -f "$MAINT_LOGROTATE_FILE" ] && parts="${parts} Logrotation"
     [ -x "$MAINT_DISK_SCRIPT" ] && parts="${parts} Disk-Monitor"
 
-    if crontab -l 2>/dev/null | grep -qF "$MAINT_DISK_SCRIPT"; then
+    if crontab -l 2>/dev/null | grep -qxF "$MAINT_DISK_CRON_JOB"; then
         parts="${parts} (Cronjob 02:00 aktiv)"
     fi
 
@@ -216,7 +220,7 @@ module_audit() {
     if [ "$do_disk" = "1" ]; then
         if [ ! -x "$MAINT_DISK_SCRIPT" ]; then
             missing="${missing}${missing:+, }Monitor-Skript"
-        elif ! crontab -l 2>/dev/null | grep -qF "$MAINT_DISK_SCRIPT"; then
+        elif ! crontab -l 2>/dev/null | grep -qxF "$MAINT_DISK_CRON_JOB"; then
             missing="${missing}${missing:+, }Disk-Monitor-Cronjob"
         fi
     fi

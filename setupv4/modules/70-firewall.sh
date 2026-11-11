@@ -126,7 +126,10 @@ fw_configure_ufw() {
         run_eval "ufw --force reload"
         if command -v ufw >/dev/null 2>&1 && [ "$DRY_RUN" != "1" ]; then
             local v6_rules
-            v6_rules="$(ufw status 2>/dev/null | grep -c 'v6\.\|::\)' || true)"
+            # ufw schreibt IPv6-Regeln als "(v6)" - das alte Muster 'v6\.\|::\)'
+            # war als BRE ungueltig ("Unmatched ) or \)") und lieferte deshalb
+            # immer 0: die Warnung unten kam bei jedem Firewall-Zustand.
+            v6_rules="$(ufw status 2>/dev/null | grep -c '(v6)' || true)"
             if [ "${v6_rules:-0}" -gt 0 ]; then
                 success "Firewall deckt IPv6 ab ($v6_rules IPv6-Regeln)."
             else

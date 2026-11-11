@@ -62,6 +62,10 @@ gitssh_trim() {
 # Zerlegt GIT_SSH_SERVICES (ein Eintrag je Zeile) in die Einzelservices.
 # Ungültige Zeilen werden gemeldet und übersprungen - ein Tippfehler darf
 # nicht dazu führen, dass das ganze Modul abbricht.
+#
+# Wichtig: die Funktion schreibt NICHTS auf stdout - die Meldungen laufen
+# ueber warning() nach stderr. Sonst wuerde der Loader (head -n 1) eine
+# Warnzeile statt des Status als erste Zeile uebernehmen.
 gitssh_parse_services() {
     GITS_SERVICES=()
     local line host short own url
@@ -286,8 +290,11 @@ gitssh_write_ssh_config() {
         # bekommt deshalb bewusst keinen Eintrag in die ssh_config.
         [ "$own" = "1" ] || continue
 
-        block="# ${host} - Git-Zugriff, Key-Kommentar: ${key_comment}
-Host ${host}
+        # Der Kommentar steht INNERHALB des Blocks. gitssh_strip_host_block
+        # entfernt den Bereich ab der "Host"-Zeile - ein Kommentar davor
+        # wuerde bei jedem Lauf stehen bleiben und sich verdoppeln.
+        block="Host ${host}
+    # ${host} - Git-Zugriff, Key-Kommentar: ${key_comment}
     HostName ${host}
     User git
     IdentityFile ~/.ssh/id_ed25519_${short}
@@ -573,7 +580,10 @@ gitssh_upload_key_via_api() {
         -H "$auth" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         -d "$payload" \
-        "$endpoint" 2>/dev/null || echo "000")
+        "$endpoint" 2>/dev/null)
+    # curl schreibt bei einem Verbindungsfehler selbst "000" - ein zusaetzliches
+    # "|| echo 000" haengte ein zweites an ("000000") und passte in keinen Fall.
+    code="${code:-000}"
 
     case "$code" in
         200|201)
@@ -716,7 +726,10 @@ gitssh_delete_key() {
     code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
         -X DELETE \
         -H "$auth" \
-        "${endpoint}/${key_id}" 2>/dev/null || echo "000")
+        "${endpoint}/${key_id}" 2>/dev/null)
+    # Siehe gitssh_upload_key_via_api: curl schreibt "000" selbst, ein
+    # zusaetzliches "|| echo 000" ergaebe "000000".
+    code="${code:-000}"
 
     case "$code" in
         200|204)
@@ -955,6 +968,15 @@ module_main() {
         local pub_file="${ssh_dir}/id_ed25519_${short}.pub"
         if [ ! -f "$pub_file" ] && [ "$DRY_RUN" != "1" ]; then
             debug "Kein oeffentlicher Key fuer $host vorhanden - Upload uebersprungen."
+            manual=$((manual + 1))
+            continue
+        fi
+
+        # Ohne Basis-URL laesst sich kein API-Endpunkt bilden - bei GitHub ist
+        # die Basis fest eingebaut, bei allen anderen Diensten nicht. Ohne
+        # diese Pruefung wuerde curl gegen "/api/v1/user/keys" laufen.
+        if [ "$host" != "$GITS_GITHUB_HOST" ] && [ -z "$url" ]; then
+            warning "Keine Basis-URL fuer $host - der Key kann nicht per API registriert werden."
             manual=$((manual + 1))
             continue
         fi
