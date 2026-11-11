@@ -51,7 +51,16 @@ REBOOT_AT_END=false
 
 # --- SSH ---
 SSH_PORT=2222
+# Erlaubte SSH-Benutzer, kommagetrennt. Leer = nur die Gruppe "remotessh"
+# darf sich anmelden. Der Admin-Benutzer wird IMMER automatisch ergaenzt,
+# damit ein Tippfehler hier nicht den einzigen Zugang abschneidet.
 SSH_ALLOWED_USERS=""          # z. B. "sugo,deploy"
+
+# SSH nur ueber das NetBird-Interface erreichbar machen. Der Dienst bindet
+# dann nur an die NetBird-IP - aus dem Internet ist der SSH-Port dann
+# nicht erreichbar und fuer Scanner unsichtbar. Voraussetzung: NetBird
+# laeuft bereits. Achtung: danach ist SSH nur noch im Mesh erreichbar!
+SSH_NETBIRD_ONLY=false
 
 # --- Benutzerverwaltung ---
 CREATE_BACKUP_USER=false

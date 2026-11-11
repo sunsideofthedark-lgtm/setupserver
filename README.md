@@ -29,18 +29,29 @@ sudo /opt/serversetup/setup.sh --status
 
 **Ubuntu / Debian:**
 ```bash
-apt update && apt install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver && sudo bash ./setupv3.sh
+apt update && apt install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver/setupv4 && sudo bash ./setup.sh
 ```
 
 **CentOS / RHEL / Rocky / Alma:**
 ```bash
-yum install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver && sudo bash ./setupv3.sh
+yum install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver/setupv4 && sudo bash ./setup.sh
 ```
 
 **Fedora:**
 ```bash
-dnf install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver && sudo bash ./setupv3.sh
+dnf install -y git && git clone https://github.com/sunsideofthedark-lgtm/setupserver.git && cd setupserver/setupv4 && sudo bash ./setup.sh
 ```
+
+Startet das Menü. Für einen Lauf ohne Nachfragen die Konfiguration anlegen und
+mitgeben:
+
+```bash
+sudo bash ./setup.sh --init
+sudo bash ./setup.sh --config config/setup.conf
+```
+
+> Das ältere, monolithische `setupv3.sh` liegt weiterhin im Repository und
+> funktioniert unverändert. Neuinstallationen sollten `setupv4` nutzen.
 
 ---
 

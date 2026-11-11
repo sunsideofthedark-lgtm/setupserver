@@ -255,6 +255,62 @@ module_main() {
         "# SSH-Zugriff nur für remotessh-Gruppe" \
         "AllowGroups remotessh"
 
+    # --- Benutzerbezogene Beschränkung (AllowUsers) ---
+    # AllowGroups und AllowUsers wirken zusammen (UND): Ein Benutzer muss in
+    # der Gruppe sein UND in der Liste stehen. Das ist die strengste Form.
+    #
+    # Sicherheitsregel: Der Admin-Benutzer wird IMMER mit aufgenommen. Ohne
+    # diese Absicherung koennte ein Tippfehler in der Liste den einzigen
+    # SSH-Zugang des Servers abschneiden.
+    local allowed_users
+    allowed_users="$(config_get SSH_ALLOWED_USERS "")"
+    if [ -n "$allowed_users" ]; then
+        local user_list user_name
+        user_list=""
+        for user_name in ${allowed_users//,/ }; do
+            user_name="$(echo "$user_name" | xargs)"
+            [ -z "$user_name" ] && continue
+            case ",$user_list," in
+                *",$user_name,"*) continue ;;
+            esac
+            user_list="${user_list:+$user_list,}$user_name"
+        done
+
+        # Den Zielbenutzer zwingend mit aufnehmen - Lockout verhindern
+        if [ -n "$target_user" ]; then
+            case ",$user_list," in
+                *",$target_user,"*) ;;
+                *) user_list="${user_list:+$user_list,}$target_user" ;;
+            esac
+        fi
+
+        if [ -n "$user_list" ]; then
+            info "Beschränke SSH-Zugriff auf Benutzer: $user_list"
+            ssh_append_lines "$config" \
+                "# SSH-Zugriff nur für die gelisteten Benutzer" \
+                "AllowUsers $user_list"
+        fi
+    else
+        debug "SSH_ALLOWED_USERS nicht gesetzt - Zugriff regelt allein die Gruppe remotessh"
+    fi
+
+    # --- SSH nur über das NetBird-Interface erreichbar machen ---
+    # Der Dienst bindet dann nur an die NetBird-IP. Aus dem Internet ist der
+    # SSH-Port damit nicht erreichbar - automatische Scanner sehen nichts.
+    if config_bool SSH_NETBIRD_ONLY; then
+        local netbird_ip
+        netbird_ip="$(ssh_netbird_ip)"
+        if [ -n "$netbird_ip" ]; then
+            info "Binde SSH an das NetBird-Interface ($netbird_ip) - nur im Mesh erreichbar."
+            run_eval "sed -i '/^#*ListenAddress/d' '$config'"
+            ssh_append_lines "$config" \
+                "# SSH nur ueber das NetBird-Interface erreichbar" \
+                "ListenAddress $netbird_ip"
+        else
+            warning "SSH_NETBIRD_ONLY ist gesetzt, aber es laeuft kein NetBird - SSH bleibt auf allen Interfaces erreichbar."
+        fi
+    fi
+
     # Zusätzliche SSH-Härtungs-Optionen
     info "Aktiviere zusätzliche SSH-Sicherheitsoptionen..."
     debug "Erweiterte SSH-Härtung"
@@ -270,11 +326,32 @@ module_main() {
     ssh_append_lines "$config" "# Erweiterte SSH-Sicherheitsoptionen" \
         "${SSH_HARDEN_OPTIONS[@]}"
 
+    # --- Konfiguration prüfen, BEVOR der Dienst neu gestartet wird ---
+    # Das ist der wichtigste Schritt des ganzen Moduls: Eine syntaktisch
+    # kaputte sshd_config macht der Neustart den Server unerreichbar. Also
+    # erst prüfen, dann starten, und bei einem Fehler die alte Konfiguration
+    # zurückholen.
+    info "Prüfe SSH-Konfiguration..."
+    ssh_validate_config "$config"
+    local validate_rc=$?
+    if [ $validate_rc -eq 1 ]; then
+        error "Die neue SSH-Konfiguration ist fehlerhaft - der Dienst wird NICHT neu gestartet."
+        ssh_restore_config "$config"
+        return 2
+    elif [ $validate_rc -eq 2 ]; then
+        warning "Konfiguration konnte nicht geprüft werden - der Neustart wird trotzdem versucht."
+    else
+        success "SSH-Konfiguration ist gültig."
+    fi
+
     info "Starte SSH-Dienst neu, um Änderungen zu übernehmen..."
     debug "Neustarten des SSH-Dienstes: $SSH_SERVICE"
 
     if ! manage_service restart "$SSH_SERVICE"; then
-        error "SSH-Dienst-Neustart fehlgeschlagen"
+        error "SSH-Dienst-Neustart fehlgeschlagen - Konfiguration wird zurückgerollt."
+        ssh_restore_config "$config"
+        manage_service restart "$SSH_SERVICE" >/dev/null 2>&1
+        error "Die alte SSH-Konfiguration wurde wiederhergestellt."
         return 2
     fi
 
@@ -287,6 +364,71 @@ module_main() {
         warning "Zukünftige SSH-Verbindungen müssen über Port $SSH_PORT mit SSH-Schlüssel erfolgen."
     fi
 
+    return 0
+}
+
+# Prüft die SSH-Konfiguration mit dem echten sshd - genau so, wie es der
+# Dienst selbst tun würde. "sshd -t" bricht bei Syntaxfehlern, unbekannten
+# Direktiven und fehlerhaften Pfaden ab, ohne den Dienst anzufassen.
+#
+# Rückgabe:  0 = gültig
+#            1 = fehlerhaft -> abbrechen und zurücksetzen
+#            2 = nicht prüfbar (z. B. fehlende Host-Keys auf einem frischen
+#                Server) -> warnen, aber weitermachen
+ssh_validate_config() {
+    local config="$1"
+    local output
+
+    if ! command -v sshd >/dev/null 2>&1; then
+        warning "sshd-Binary nicht gefunden - Konfiguration kann nicht geprüft werden."
+        return 2
+    fi
+
+    output="$(sshd -t -f "$config" 2>&1)"
+    if [ $? -eq 0 ]; then
+        debug "sshd -t: Konfiguration ist gültig"
+        return 0
+    fi
+
+    # Fehlende Host-Keys heißen: es läuft noch kein sshd, es kann also auch
+    # nichts kaputtgemacht werden. Das ist kein Konfigurationsfehler.
+    if printf '%s' "$output" | grep -qiE 'no hostkeys|host key'; then
+        warning "sshd -t kann nicht prüfen (keine Host-Keys vorhanden - es läuft noch kein sshd)."
+        debug "sshd -t Ausgabe: $output"
+        return 2
+    fi
+
+    error "sshd -t meldet einen Fehler:"
+    echo "$output" | sed 's/^/     /'
+    return 1
+}
+
+# Holt die zuletzt von create_backup() erzeugte Sicherung zurück.
+ssh_restore_config() {
+    local config="$1"
+    local backup_dir="${BACKUP_DIR:-/var/backups/serversetup}"
+    local newest
+
+    newest=$(ls -1t "$backup_dir"/$(echo "$config" | tr '/' '_').*.bak 2>/dev/null | head -n1)
+    if [ -z "$newest" ]; then
+        error "Keine Sicherung für $config gefunden - bitte manuell prüfen!"
+        return 1
+    fi
+
+    if cp -p "$newest" "$config" 2>/dev/null; then
+        success "SSH-Konfiguration aus $newest wiederhergestellt."
+        return 0
+    fi
+
+    error "Wiederherstellung der SSH-Konfiguration fehlgeschlagen!"
+    return 1
+}
+
+# Ermittelt die IP-Adresse des NetBird-Interfaces (wt0).
+ssh_netbird_ip() {
+    local ip
+    ip="$(ip -4 -o addr show dev wt0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+    [ -n "$ip" ] && echo "$ip"
     return 0
 }
 
