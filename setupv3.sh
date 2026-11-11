@@ -572,7 +572,12 @@ configure_zot_mirrors() {
     while true; do
         echo -e "${C_CYAN}Zot-API-Key (Eingabe bleibt verborgen): ${C_RESET}" >&2
         api_key=""
-        read -rs api_key || api_key=""
+        # EOF (Ctrl-D) oder geschlossenes stdin: abbrechen statt endlos nachfragen.
+        if ! read -rs api_key; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
         echo "" >&2
         if [ -z "$api_key" ]; then
             warning "Der API-Key darf nicht leer sein."
@@ -580,7 +585,11 @@ configure_zot_mirrors() {
         fi
         echo -e "${C_CYAN}Zot-API-Key wiederholen: ${C_RESET}" >&2
         confirm_key=""
-        read -rs confirm_key || confirm_key=""
+        if ! read -rs confirm_key; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
         echo "" >&2
         if [ "$api_key" != "$confirm_key" ]; then
             warning "Die Eingaben stimmen nicht überein. Bitte erneut versuchen."

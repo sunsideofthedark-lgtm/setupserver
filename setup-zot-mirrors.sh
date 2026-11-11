@@ -248,7 +248,12 @@ success "Zot-Benutzername: $ZOT_USER"
 ZOT_API_KEY=""
 while true; do
     echo -e "${C_CYAN}Zot-API-Key (Eingabe bleibt verborgen): ${C_RESET}" >&2
-    read -rs ZOT_API_KEY || ZOT_API_KEY=""
+    # EOF (Ctrl-D) oder geschlossenes stdin: abbrechen statt endlos nachfragen.
+    if ! read -rs ZOT_API_KEY; then
+        echo "" >&2
+        error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+        exit 1
+    fi
     echo "" >&2
     if [ -z "$ZOT_API_KEY" ]; then
         warning "Der API-Key darf nicht leer sein."
@@ -256,7 +261,11 @@ while true; do
     fi
     echo -e "${C_CYAN}Zot-API-Key wiederholen: ${C_RESET}" >&2
     confirm_key=""
-    read -rs confirm_key || confirm_key=""
+    if ! read -rs confirm_key; then
+        echo "" >&2
+        error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+        exit 1
+    fi
     echo "" >&2
     if [ "$ZOT_API_KEY" != "$confirm_key" ]; then
         warning "Die Eingaben stimmen nicht überein. Bitte erneut versuchen."
