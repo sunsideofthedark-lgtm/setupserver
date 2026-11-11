@@ -77,18 +77,28 @@ debug() {
     echo "$message" >> "$LOGFILE" 2>/dev/null || true
 }
 
+# Alle Ausgabe-Funktionen schreiben nach stderr.
+#
+# Warum: stdout ist fuer maschinenlesbare Ausgabe reserviert - vor allem fuer
+# module_status() und module_audit(), die im Vertrag "genau eine Zeile auf
+# stdout" liefern. Laegt eine Meldung auf stdout, landet sie in
+# "$(...)"-Auswertungen im zurueckgegebenen Wert und verfaelscht das Ergebnis.
+# Beispiel aus dem Tuning-Modul:
+#     size_mb="$(tuning_swap_size_mb)"   # <- die Warnung landet im Wert
+# Der alte Aufruf mit "read -p" geht bewusst auch nach stderr, das ist hier
+# konsistent umgesetzt.
 info() {
-    echo -e "${C_BLUE}[INFO] $1${C_RESET}"
+    echo -e "${C_BLUE}[INFO] $1${C_RESET}" >&2
     log_action "INFO" "$1"
 }
 
 success() {
-    echo -e "${C_GREEN}[SUCCESS] $1${C_RESET}"
+    echo -e "${C_GREEN}[SUCCESS] $1${C_RESET}" >&2
     log_action "SUCCESS" "$1"
 }
 
 warning() {
-    echo -e "${C_YELLOW}[WARNING] $1${C_RESET}"
+    echo -e "${C_YELLOW}[WARNING] $1${C_RESET}" >&2
     log_action "WARNING" "$1"
 }
 
@@ -167,6 +177,19 @@ ask_value() {
     local varname="$3"
     local input=""
 
+    # Im nicht-interaktiven Modus wird nicht gelesen. Sonst blockiert die
+    # Abfrage in einem Terminal und faellt ohne TTY still auf den Standard
+    # zurueck - beides passt nicht zu einem unattended Lauf.
+    if [ "$NON_INTERACTIVE" = "1" ]; then
+        if [ -z "$default_value" ]; then
+            error "Kein Wert für '${varname}' - im nicht-interaktiven Modus nicht abfragbar."
+            return 1
+        fi
+        debug "ask_value (nicht-interaktiv): ${varname} = ${default_value}"
+        printf -v "$varname" '%s' "$default_value"
+        return 0
+    fi
+
     if [ -n "$default_value" ]; then
         echo -e "${C_CYAN}${prompt} [${C_RESET}${default_value}${C_CYAN}]: ${C_RESET}" >&2
     else
@@ -193,14 +216,25 @@ ask_secret() {
 
     while true; do
         echo -e "${C_CYAN}${prompt}: ${C_RESET}" >&2
-        read -rs input || input=""
+        # EOF (Ctrl-D) oder geschlossenes stdin: abbrechen statt endlos
+        # nachfragen. Ohne diese Pruefung laeuft die Schleife bei leerer
+        # Eingabe unendlich.
+        if ! read -rs input; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
         echo "" >&2
         if [ -z "$input" ]; then
             warning "Eingabe darf nicht leer sein."
             continue
         fi
         echo -e "${C_CYAN}${prompt} (wiederholen): ${C_RESET}" >&2
-        read -rs confirm_input || confirm_input=""
+        if ! read -rs confirm_input; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfügbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
         echo "" >&2
         if [ "$input" != "$confirm_input" ]; then
             warning "Die Eingaben stimmen nicht überein."

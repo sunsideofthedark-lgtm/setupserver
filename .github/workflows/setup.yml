@@ -68,8 +68,12 @@ jobs:
         run: |
           fail=0
 
-          # Vorlagen und Dokumentation dürfen keine echten Werte enthalten
-          if git grep -nE '^\s*(ZOT_API_KEY|KOMODO_PASSKEY|PANGOLIN_SPK|NETBIRD_SETUP_KEY)=["'\'']?[^"'\''[:space:]#]' -- '*.example' '*.md'; then
+          # Vorlagen und Dokumentation dürfen keine echten Werte enthalten.
+          # Der Wert muss mindestens 12 Zeichen lang sein und aus dem
+          # Zeichenbereich fuer echte Tokens stammen - sonst wuerde ein
+          # Platzhalter wie "ZOT_API_KEY=..." als Treffer gewertet und die
+          # CI bei jedem Push rot.
+          if git grep -nE '^\s*(ZOT_API_KEY|KOMODO_PASSKEY|PANGOLIN_SPK|NETBIRD_SETUP_KEY)=["'\'']?[A-Za-z0-9_/+=-]{12,}' -- '*.example' '*.md'; then
             echo "::error::Es könnten Secrets in versionierten Dateien stehen."
             fail=1
           fi

@@ -57,11 +57,39 @@ reboot_required() {
     return 0
 }
 
+# Maskiert Geheimnisse in einer Befehlszeile, bevor sie protokolliert wird.
+# Ohne das landen Passphrasen (ssh-keygen -N ...) und Setup-Keys
+# (netbird up --setup-key ...) im Klartext im Logfile.
+#
+# Ersetzt den Wert nach den bekannten Geheimnis-Optionen durch ****.
+mask_command_secrets() {
+    local cmd="$1"
+    local -a parts=()
+    local part mask_next=0
+
+    read -ra parts <<< "$cmd"
+
+    for part in "${parts[@]}"; do
+        if [ "$mask_next" = "1" ]; then
+            part="****"
+            mask_next=0
+        fi
+        case "$part" in
+            -N|--password|--passphrase|--token|--setup-key|--api-key|--secret|--key)
+                mask_next=1
+                ;;
+        esac
+        printf '%s ' "$part"
+    done | sed 's/ $//'
+}
+
 # Führt einen Befehl aus - im Dry-Run-Modus wird nur angezeigt.
 run_cmd() {
     if [ "$DRY_RUN" = "1" ]; then
-        echo -e "${C_MAGENTA}[DRY-RUN] $*${C_RESET}" >&2
-        log_action "DRY-RUN" "$*"
+        local safe
+        safe="$(mask_command_secrets "$*")"
+        echo -e "${C_MAGENTA}[DRY-RUN] ${safe}${C_RESET}" >&2
+        log_action "DRY-RUN" "$safe"
         return 0
     fi
     "$@"
@@ -70,8 +98,10 @@ run_cmd() {
 # Wie run_cmd, aber für Zeichenketten (wird intern evaluiert)
 run_eval() {
     if [ "$DRY_RUN" = "1" ]; then
-        echo -e "${C_MAGENTA}[DRY-RUN] $1${C_RESET}" >&2
-        log_action "DRY-RUN" "$1"
+        local safe
+        safe="$(mask_command_secrets "$1")"
+        echo -e "${C_MAGENTA}[DRY-RUN] ${safe}${C_RESET}" >&2
+        log_action "DRY-RUN" "$safe"
         return 0
     fi
     eval "$1"

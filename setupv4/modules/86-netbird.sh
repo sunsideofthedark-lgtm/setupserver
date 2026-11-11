@@ -137,7 +137,9 @@ netbird_connect() {
     netbird_ask_credentials || return 1
     netbird_build_up_command
 
-    info "Verbinde mit NetBird ($NB_CMD)..."
+    # Der Befehl darf NICHT geloggt werden: er enthaelt den Setup-Key im
+    # Klartext. Stattdessen nur die unkritischen Teile nennen.
+    info "Verbinde mit NetBird (Management: ${NB_MGMT_URL})..."
     if ! run_eval "$NB_CMD"; then
         error "NetBird-Verbindung fehlgeschlagen"
         log_action "NETBIRD" "Connection failed"
