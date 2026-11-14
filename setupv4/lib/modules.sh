@@ -25,6 +25,54 @@ MODULES_DIR="${MODULES_DIR:-}"   # wird vom Hauptscript gesetzt
 MODULE_RESULTS=()                # "id|status|dauer"
 CURRENT_MODULE=""
 
+# --- Auswahl: gesondert benannte Module ---
+# Module, die der Benutzer EINZELN und namentlich benannt hat - entweder über
+# "--modules <id>" auf der Kommandozeile oder über eine Nummer in der
+# interaktiven Modulauswahl. Diese Module laufen auch dann, wenn ihr eigener
+# INSTALL_*-Schalter nicht gesetzt ist: der Benutzer hat sie sich ausdrücklich
+# gewünscht.
+#
+# Bei einer Sammelauswahl ("Komplettes Setup", "alle", die MODULES-Liste aus der
+# Config) gilt dagegen der Schalter. Ein Modul ohne gesetzten Schalter wird
+# dann übersprungen - sonst liefen beim Komplett-Setup auch Module, die in der
+# Config gar nicht aktiviert sind, und schlugen an fehlenden Voraussetzungen
+# fehl (Docker, Netzwerk, Zugangsdaten).
+EXPLICIT_MODULES=()
+
+# Wurde dieses Modul vom Benutzer gesondert benannt?
+module_is_explicit() {
+    local module_id="$1" m
+
+    [ ${#EXPLICIT_MODULES[@]} -gt 0 ] || return 1
+    for m in "${EXPLICIT_MODULES[@]}"; do
+        [ "$m" = "$module_id" ] && return 0
+    done
+    return 1
+}
+
+# Soll das aktuelle Modul laufen?
+#
+#   module_switch_enabled <SCHALTER>
+#
+# - Schalter gesetzt                            -> ja
+# - Schalter nicht gesetzt, Modul gesondert benannt -> ja
+# - sonst                                       -> nein (Modul wird übersprungen)
+#
+# Aufruf aus einem Modul heraus; das Modul selbst wird über $MODULE_ID erkannt.
+module_switch_enabled() {
+    local key="$1"
+
+    if config_bool "$key"; then
+        return 0
+    fi
+
+    if [ -n "${MODULE_ID:-}" ] && module_is_explicit "$MODULE_ID"; then
+        return 0
+    fi
+
+    return 1
+}
+
 # --- Discovery ---
 # Liest die Metadaten aller Module. Die Auswertung läuft in einem Subshell,
 # damit ein fehlerhaftes Modul den Loader nicht beeinflusst.
@@ -85,6 +133,7 @@ resolve_module_selection() {
 
     if [ -n "$cli_modules" ]; then
         SELECTED_MODULES=()
+        EXPLICIT_MODULES=()
         local m
         IFS=',' read -ra m <<< "$cli_modules"
         local id
@@ -93,6 +142,9 @@ resolve_module_selection() {
             [ -z "$id" ] && continue
             if module_exists "$id"; then
                 SELECTED_MODULES+=("$id")
+                # Auf der Kommandozeile benannt - das Modul laeuft auch ohne
+                # gesetzten INSTALL_*-Schalter.
+                EXPLICIT_MODULES+=("$id")
             else
                 error "Unbekanntes Modul: '$id'"
                 error "Verfügbare: $(list_module_ids)"
@@ -101,6 +153,9 @@ resolve_module_selection() {
         done
     elif [ ${#MODULES[@]} -gt 0 ]; then
         SELECTED_MODULES=()
+        # Die MODULES-Liste aus der Config ist eine Sammelauswahl - hier
+        # entscheidet der INSTALL_*-Schalter, nicht die Nennung in der Liste.
+        EXPLICIT_MODULES=()
         local id
         for id in "${MODULES[@]}"; do
             id="$(echo "$id" | xargs)"
@@ -217,15 +272,19 @@ select_modules_interactive() {
 
     if [ -z "$answer" ] || [ "$answer" = "alle" ]; then
         SELECTED_MODULES=($list)
+        # Sammelauswahl - hier entscheidet der INSTALL_*-Schalter.
+        EXPLICIT_MODULES=()
         return 0
     fi
 
     if [ "$answer" = "keine" ]; then
         SELECTED_MODULES=()
+        EXPLICIT_MODULES=()
         return 0
     fi
 
     SELECTED_MODULES=()
+    EXPLICIT_MODULES=()
     local part start end m selected
     local parts=()
     IFS=',' read -ra parts <<< "$answer"
@@ -237,12 +296,18 @@ select_modules_interactive() {
             end="${BASH_REMATCH[2]}"
             for ((m=start; m<=end; m++)); do
                 selected=$(echo "$list" | cut -d' ' -f"$m")
-                [ -n "$selected" ] && SELECTED_MODULES+=("$selected")
+                if [ -n "$selected" ]; then
+                    SELECTED_MODULES+=("$selected")
+                    # Vom Benutzer namentlich gewaehlt - laeuft auch ohne
+                    # gesetzten INSTALL_*-Schalter.
+                    EXPLICIT_MODULES+=("$selected")
+                fi
             done
         elif [[ "$part" =~ ^[0-9]+$ ]]; then
             selected=$(echo "$list" | cut -d' ' -f"$part")
             if [ -n "$selected" ]; then
                 SELECTED_MODULES+=("$selected")
+                EXPLICIT_MODULES+=("$selected")
             else
                 warning "Ungültige Nummer: $part"
             fi
