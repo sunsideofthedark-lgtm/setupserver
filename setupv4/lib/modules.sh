@@ -87,9 +87,10 @@ discover_modules() {
             MODULE_FILE="$file" bash -c '
                 # shellcheck disable=SC1090
                 source "$MODULE_FILE" || exit 1
-                printf "%s\n%s\n%s\n%s\n" \
+                printf "%s\n%s\n%s\n%s\n%s\n%s\n" \
                     "${MODULE_ID:-}" "${MODULE_NAME:-}" \
-                    "${MODULE_DESC:-}" "${MODULE_ORDER:-999}"
+                    "${MODULE_DESC:-}" "${MODULE_ORDER:-999}" \
+                    "${MODULE_CATEGORY:-base}" "${MODULE_SWITCH:-}"
             ' 2>/dev/null
         ) || {
             warning "Modul konnte nicht gelesen werden: $(basename "$file")"
@@ -100,13 +101,15 @@ discover_modules() {
         name=$(echo "$meta" | sed -n 2p)
         desc=$(echo "$meta" | sed -n 3p)
         order=$(echo "$meta" | sed -n 4p)
+        category=$(echo "$meta" | sed -n 5p)
+        switches=$(echo "$meta" | sed -n 6p)
 
         if [ -z "$id" ]; then
             warning "Modul ohne MODULE_ID übersprungen: $(basename "$file")"
             continue
         fi
 
-        AVAILABLE_MODULES+=("${order}|${id}|${name}|${desc}|${file}")
+        AVAILABLE_MODULES+=("${order}|${id}|${name}|${desc}|${file}|${category}|${switches}")
         debug "Modul gefunden: $id ($name)"
     done
 
@@ -195,7 +198,7 @@ list_module_ids() {
 
 module_field() {
     local module_id="$1"
-    local field_index="$2"   # 1=order 2=id 3=name 4=desc 5=file
+    local field_index="$2"   # 1=order 2=id 3=name 4=desc 5=file 6=category 7=switches
     local entry
     [ ${#AVAILABLE_MODULES[@]} -gt 0 ] || return 1
     for entry in "${AVAILABLE_MODULES[@]}"; do
@@ -210,18 +213,22 @@ module_field() {
 module_file_for() { module_field "$1" 5; }
 module_name_for() { module_field "$1" 3; }
 module_desc_for() { module_field "$1" 4; }
+module_category_for() { module_field "$1" 6; }
+module_switches_for() { module_field "$1" 7; }
 
 # --- Anzeige ---
 show_module_list() {
-    local entry order id name desc
-    printf "  %-22s %-32s %s\n" "ID" "NAME" "BESCHREIBUNG"
-    printf "  %-22s %-32s %s\n" "----------------------" "--------------------------------" "--------------------------------"
+    local entry order id name desc category
+    printf "  %-22s %-34s %-10s %s\n" "ID" "NAME" "ART" "BESCHREIBUNG"
+    printf "  %-22s %-34s %-10s %s\n" "----------------------" "----------------------------------" "----------" "--------------------------------"
     for entry in "${AVAILABLE_MODULES[@]}"; do
         order=$(echo "$entry" | cut -d'|' -f1)
         id=$(echo "$entry" | cut -d'|' -f2)
         name=$(echo "$entry" | cut -d'|' -f3)
         desc=$(echo "$entry" | cut -d'|' -f4)
-        printf "  %-22s %-32s %s\n" "$id" "$name" "$desc"
+        category=$(echo "$entry" | cut -d'|' -f6)
+        [ "$category" = "software" ] && category="Software" || category="System"
+        printf "  %-22s %-34s %-10s %s\n" "$id" "$name" "$category" "$desc"
     done
 }
 
@@ -315,6 +322,178 @@ select_modules_interactive() {
             warning "Ungültige Eingabe: $part"
         fi
     done
+    return 0
+}
+
+# --- Software-Auswahl ---
+# Die installierbare Software (Kategorie "software") als Checkliste anbieten.
+# Die Voreinstellung kommt aus der aktuellen Konfiguration: ein gesetzter
+# Schalter ist angehakt. Docker ist standardmaessig aktiv, weil Komodo,
+# Pangolin, NetBird und das Docker-Port-Audit es voraussetzen - es bleibt
+# aber abwaehlbar.
+#
+# Die Auswahl setzt die Schalter fuer den laufenden Durchgang. Die Software-
+# Module ohne gesetzten Schalter werden beim Komplett-Setup uebersprungen.
+#
+# Rueckgabe: 0 = Auswahl getroffen, 1 = abgebrochen
+
+# Die Software-Module in Ausfuehrungsreihenfolge, je eine Zeile
+# "id|name|schalter".
+software_module_list() {
+    local entry
+    for entry in "${AVAILABLE_MODULES[@]}"; do
+        [ "$(echo "$entry" | cut -d'|' -f6)" = "software" ] || continue
+        echo "$entry" | cut -d'|' -f2,3,7
+    done
+}
+
+# Ist die SoftwareGruppe angehakt? "Angehakt" heisst: mindestens einer ihrer
+# Schalter ist gesetzt.
+software_switch_state() {
+    local switches="$1" sw
+
+    for sw in $switches; do
+        if config_bool "$sw"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Setzt alle Schalter einer Softwaregruppe auf true oder false.
+software_set_switches() {
+    local switches="$1" value="$2" sw
+
+    for sw in $switches; do
+        printf -v "$sw" '%s' "$value"
+        export "$sw"
+    done
+}
+
+# Die Software-Auswahl als Menü. Nach der Auswahl stehen die Schalter in
+# SOFTWARE_SELECTION (je "KEY=VALUE"), damit der Aufrufer sie in die
+# Konfigurationsdatei zurückschreiben kann.
+SOFTWARE_SELECTION=()
+
+select_software() {
+    local -a ids=() names=() switches=()
+    local entry id name sw answer="" idx=0
+    local part start end m n
+    local -a nums=() parts=()
+
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        id="$(echo "$entry" | cut -d'|' -f1)"
+        name="$(echo "$entry" | cut -d'|' -f2)"
+        sw="$(echo "$entry" | cut -d'|' -f3)"
+        ids+=("$id")
+        names+=("$name")
+        switches+=("$sw")
+    done < <(software_module_list)
+
+    if [ ${#ids[@]} -eq 0 ]; then
+        debug "Keine Software-Module gefunden - Auswahl entfaellt."
+        return 0
+    fi
+
+    echo ""
+    echo -e "${C_CYAN}============================================================${C_RESET}"
+    echo -e "${C_CYAN}  Software-Auswahl${C_RESET}"
+    echo -e "${C_CYAN}============================================================${C_RESET}"
+    echo ""
+    echo "  Welche Software soll eingerichtet werden?"
+    echo ""
+
+    for ((idx = 0; idx < ${#ids[@]}; idx++)); do
+        local mark=" "
+        if software_switch_state "${switches[$idx]}"; then
+            mark="x"
+        fi
+        printf "  %2d) [%s] %-34s %s\n" "$((idx + 1))" "$mark" "${names[$idx]}" "${ids[$idx]}"
+    done
+
+    echo ""
+    echo -e "${C_CYAN}  Nummern zum Umschalten (z. B. 2,5,7-9) | alle | keine${C_RESET}"
+    echo -e "${C_CYAN}  (Enter ohne Eingabe = Auswahl unveraendert lassen)${C_RESET}"
+    printf "  > "
+    read -r answer || answer=""
+
+    # "Alle", "KEINE" und "Alle bitte" sollen genauso funktionieren wie die
+    # kleingeschriebenen Varianten.
+    answer="$(echo "$answer" | tr '[:upper:]' '[:lower:]')"
+
+    if [ -z "$answer" ]; then
+        echo "  Auswahl unveraendert."
+    else
+        case "$answer" in
+            alle)
+                for ((idx = 0; idx < ${#ids[@]}; idx++)); do
+                    software_set_switches "${switches[$idx]}" "true"
+                done
+                ;;
+            keine)
+                for ((idx = 0; idx < ${#ids[@]}; idx++)); do
+                    software_set_switches "${switches[$idx]}" "false"
+                done
+                ;;
+            *)
+                IFS=',' read -ra parts <<< "$answer"
+                for part in "${parts[@]}"; do
+                    part="$(echo "$part" | xargs)"
+                    [ -z "$part" ] && continue
+                    if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                        start="${BASH_REMATCH[1]}"
+                        end="${BASH_REMATCH[2]}"
+                        for ((m = start; m <= end; m++)); do
+                            nums+=("$m")
+                        done
+                    elif [[ "$part" =~ ^[0-9]+$ ]]; then
+                        nums+=("$part")
+                    else
+                        warning "Ungültige Eingabe: $part"
+                    fi
+                done
+
+                if [ ${#nums[@]} -gt 0 ]; then
+                    for n in "${nums[@]}"; do
+                        if [ "$n" -lt 1 ] || [ "$n" -gt "${#ids[@]}" ]; then
+                            warning "Ungültige Nummer: $n"
+                            continue
+                        fi
+                        idx=$((n - 1))
+                        # Die Gruppe schaltet komplett um: ist sie angehakt,
+                        # geht sie aus, sonst kommt sie an.
+                        if software_switch_state "${switches[$idx]}"; then
+                            software_set_switches "${switches[$idx]}" "false"
+                        else
+                            software_set_switches "${switches[$idx]}" "true"
+                        fi
+                    done
+                fi
+                ;;
+        esac
+    fi
+
+    # Auswahl protokollieren und anzeigen
+    SOFTWARE_SELECTION=()
+    echo ""
+    echo "  Auswahl:"
+    for ((idx = 0; idx < ${#ids[@]}; idx++)); do
+        local mark=" "
+        if software_switch_state "${switches[$idx]}"; then
+            mark="x"
+        fi
+        printf "   [%s] %s\n" "$mark" "${names[$idx]}"
+
+        for sw in ${switches[$idx]}; do
+            if config_bool "$sw"; then
+                SOFTWARE_SELECTION+=("${sw}=true")
+            else
+                SOFTWARE_SELECTION+=("${sw}=false")
+            fi
+        done
+    done
+
     return 0
 }
 

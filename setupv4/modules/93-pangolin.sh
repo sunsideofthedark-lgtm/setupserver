@@ -41,6 +41,11 @@ MODULE_ORDER=93
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("vpn" "docker" "monitoring")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_PANGOLIN"
+
 PANGOLIN_DEFAULT_ENDPOINT="https://pangolin.sunriseing.dev"
 PANGOLIN_STACK_BASE="/opt/komodo/stacks"
 

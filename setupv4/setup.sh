@@ -365,6 +365,12 @@ if [ $selection_rc -eq 2 ]; then
                 mapfile -t SELECTED_MODULES < <(
                     printf '%s\n' "${AVAILABLE_MODULES[@]}" | cut -d'|' -f2
                 )
+                # Vor dem Lauf entscheidet der Benutzer, welche Software
+                # eingerichtet wird. Die Schalter der Auswahl gelten fuer
+                # diesen Durchgang und koennen in die Config zurueckgeschrieben
+                # werden.
+                select_software
+                config_save_software_selection
                 break
                 ;;
             2)
@@ -432,7 +438,17 @@ config_summary
 echo ""
 info "Geplante Module:"
 for m in "${SELECTED_MODULES[@]}"; do
-    echo "  • $m - $(module_name_for "$m")"
+    m_name="$(module_name_for "$m")"
+    # Software-Module ohne gesetzten Schalter werden uebersprungen. Der Plan
+    # soll das sagen - sonst laeuft man in ein "warum ist das passiert".
+    m_hint=""
+    if [ "$(module_category_for "$m")" = "software" ]; then
+        m_switches="$(module_switches_for "$m")"
+        if ! software_switch_state "$m_switches"; then
+            m_hint="  (nicht ausgewählt - wird übersprungen)"
+        fi
+    fi
+    echo "  • $m - $m_name$m_hint"
 done
 
 # --- Sicherheitsabfrage ---

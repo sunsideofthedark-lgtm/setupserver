@@ -20,6 +20,11 @@ MODULE_ORDER=84
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("software" "runtime")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_NODEJS"
+
 node_install() {
     case "$OS_ID" in
         ubuntu|debian)

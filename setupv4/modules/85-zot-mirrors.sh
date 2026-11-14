@@ -24,6 +24,11 @@ MODULE_ORDER=85
 MODULE_REQUIRED_KEYS=(ZOT_ENDPOINT)
 MODULE_TAGS=("docker" "performance")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="ZOT_MIRRORS"
+
 # Registry-Mappings: domain|upstream-server|zot-prefix
 #   domain   - Name, wie er im Image-Pfad steht (z. B. ghcr.io/linuxserver/nginx)
 #   upstream - Echter Endpunkt im Internet (Fallback, falls Zot nicht antwortet)

@@ -41,6 +41,11 @@ MODULE_ORDER=92
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("monitoring" "docker" "vpn")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_KOMODO"
+
 KOMODO_DEFAULT_ROOT_DIR="/opt/komodo"
 KOMODO_DEFAULT_ENDPOINT="komodo.example.com"
 

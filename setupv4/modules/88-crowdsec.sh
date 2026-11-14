@@ -22,6 +22,11 @@ MODULE_ORDER=88
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_CROWDSEC"
+
 CROWDSEC_INSTALL_URL="https://install.crowdsec.net"
 
 # Installiert eine Collection - ein Fehlschlag ist nicht kritisch, die Engine

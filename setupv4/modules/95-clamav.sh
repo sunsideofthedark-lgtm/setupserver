@@ -26,6 +26,11 @@ MODULE_ORDER=95
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit" "virenschutz")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_CLAMAV"
+
 # Prüft, ob ClamAV schon auf dem System liegt. Der zweite Parameter ist der
 # Kommandoname, falls das Paket anders heisst als das Binary.
 clamav_installed() {

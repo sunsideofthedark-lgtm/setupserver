@@ -21,6 +21,11 @@ MODULE_ORDER=87
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_FAIL2BAN"
+
 F2B_JAIL_CONF="/etc/fail2ban/jail.conf"
 # Standardpfad von Fail2Ban - wird nicht mehr beschrieben, der Jail steht
 # in der eigenen Datei unter jail.d/.

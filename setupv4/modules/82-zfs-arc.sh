@@ -25,6 +25,11 @@ MODULE_ORDER=82
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("zfs" "performance")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_ZFS_ARC"
+
 ZFS_ARC_PARAM="/sys/module/zfs/parameters/zfs_arc_max"
 ZFS_ARC_CONF="/etc/modprobe.d/zfs.conf"
 

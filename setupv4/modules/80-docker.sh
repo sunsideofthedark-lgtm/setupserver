@@ -22,6 +22,11 @@ MODULE_ORDER=80
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("docker" "software")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_DOCKER"
+
 DOCKER_DAEMON_JSON="/etc/docker/daemon.json"
 DOCKER_IPV4_POOL_BASE="172.25.0.0/16"
 DOCKER_IPV4_POOL_SIZE=24

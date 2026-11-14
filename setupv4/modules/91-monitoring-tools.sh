@@ -28,6 +28,11 @@ MODULE_ORDER=91
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("monitoring" "tools")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_HTOP INSTALL_IOTOP INSTALL_NETHOGS INSTALL_NCUDU INSTALL_TMUX INSTALL_DB_CLIENTS INSTALL_GIT INSTALL_ZIP"
+
 # key|paket(e)|Kommando zur Prüfung
 #   key     - Config-Schalter
 #   paket   - was an install_package übergeben wird

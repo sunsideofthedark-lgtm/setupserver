@@ -43,6 +43,11 @@ MODULE_ORDER=94
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("git" "ssh" "github" "forgejo")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_GIT_SSH"
+
 # GITHUB_HOST - an dieser Stelle ist die GitHub-CLI sinnvoll, weil sie den
 # Key für github.com hochladen kann. Forgejo/Gitea bringen keine eigene CLI
 # mit, für sie wird dieser Weg komplett übersprungen.

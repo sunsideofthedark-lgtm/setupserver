@@ -29,6 +29,11 @@ MODULE_ORDER=86
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("netzwerk" "vpn" "software")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_NETBIRD"
+
 # Management-URL von NetBird Cloud - der Standard des netbird-CLI. Wird
 # verwendet, wenn keine eigene Management-URL angegeben ist.
 NB_MGMT_CLOUD_URL="https://api.netbird.io"

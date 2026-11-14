@@ -43,6 +43,11 @@ MODULE_ORDER=96
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("monitoring" "agent")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_OMNISIGHT"
+
 OMNISIGHT_DEFAULT_URL="https://omnisight.sunriseing.dev"
 OMNISIGHT_DEFAULT_ROLE="linux"
 OMNISIGHT_UNIT="omnisight-agent.service"

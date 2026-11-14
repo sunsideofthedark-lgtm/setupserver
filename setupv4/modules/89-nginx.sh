@@ -19,6 +19,11 @@ MODULE_ORDER=89
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("web")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_NGINX"
+
 module_main() {
     if ! module_switch_enabled INSTALL_NGINX; then
         skip "INSTALL_NGINX ist nicht gesetzt - NGINX wird nicht angefasst."

@@ -100,7 +100,10 @@ config_set_defaults() {
     FIREWALL_DOCKER_EXT_IF="${FIREWALL_DOCKER_EXT_IF:-eth0}"
 
     # --- Software ---
-    INSTALL_DOCKER="${INSTALL_DOCKER:-false}"
+    # Docker ist die Grundlage fuer Komodo, Pangolin, NetBird und das
+    # Docker-Port-Audit. Es ist deshalb standardmaessig aktiv - im
+    # Software-Menue des Setup bleibt es aber abwaehlbar.
+    INSTALL_DOCKER="${INSTALL_DOCKER:-true}"
     INSTALL_NODEJS="${INSTALL_NODEJS:-false}"
     INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-false}"
     INSTALL_ZFS_ARC="${INSTALL_ZFS_ARC:-false}"
@@ -278,6 +281,79 @@ config_candidate_paths() {
         printf '%s\n' "$candidate"
     done
 
+    return 0
+}
+
+# --- Software-Auswahl zurueckschreiben ---
+# Schreibt die im Auswahlmenue getroffene Software-Auswahl in die geladene
+# Konfigurationsdatei zurueck. Damit verhaelt sich der naechste Lauf genauso
+# wie dieser.
+#
+# Ohne geladene Config gibt es nichts zu schreiben - dann weist der Hinweis
+# auf "--init" hin. Das Rueckschreiben aendert eine Datei des Benutzers,
+# deshalb wird vorher gefragt und die Datei gesichert.
+config_save_software_selection() {
+    local entry key value file
+
+    if [ ${#SOFTWARE_SELECTION[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
+        info "Keine Konfigurationsdatei geladen - die Auswahl gilt nur fuer diesen Lauf."
+        echo "     Mit 'sudo bash setup.sh --init' laesst sich eine dauerhafte Config erzeugen."
+        return 0
+    fi
+
+    file="$CONFIG_FILE"
+
+    if [ "$NON_INTERACTIVE" = "1" ]; then
+        skip "Keine Rueckfrage moeglich - die Auswahl wird nicht gespeichert."
+        return 0
+    fi
+
+    if ! ask_yes_no "Auswahl in $file speichern?" "y"; then
+        info "Auswahl nicht gespeichert - sie gilt nur fuer diesen Lauf."
+        return 0
+    fi
+
+    create_backup "$file"
+
+    for entry in "${SOFTWARE_SELECTION[@]}"; do
+        key="${entry%%=*}"
+        value="${entry#*=}"
+        if ! config_set_value_in_file "$file" "$key" "$value"; then
+            error "Schalter '$key' konnte nicht in $file geschrieben werden."
+            return 1
+        fi
+    done
+
+    success "Software-Auswahl in $file gespeichert."
+    return 0
+}
+
+# Setzt eine Variable in einer Shell-Konfigurationsdatei: eine vorhandene
+# Zeile wird ersetzt, sonst wird die Zuweisung angehaengt.
+config_set_value_in_file() {
+    local file="$1" key="$2" value="$3"
+    local tmp
+
+    if grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file" 2>/dev/null; then
+        tmp="$(mktemp "${file}.XXXXXX" 2>/dev/null)" || return 1
+        if sed -E "s|^([[:space:]]*(export[[:space:]]+)?)${key}=.*$|\1${key}=${value}|" \
+            "$file" > "$tmp" 2>/dev/null; then
+            # Ueber die Zieldatei kopieren statt mv - so bleiben Rechte und
+            # Eigentuemer der Config erhalten.
+            if cat "$tmp" > "$file" 2>/dev/null; then
+                rm -f "$tmp"
+                return 0
+            fi
+        fi
+        rm -f "$tmp"
+        return 1
+    fi
+
+    printf '\n# Auswahl aus dem Setup-Menue\n%s=%s\n' "$key" "$value" >> "$file" 2>/dev/null || return 1
     return 0
 }
 

@@ -21,6 +21,11 @@ MODULE_ORDER=90
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("monitoring")
 
+# "base" gehoert zum System und laeuft immer mit, "software" ist
+# installierbare Software und im Auswahlmenue waehlbar.
+MODULE_CATEGORY="software"
+MODULE_SWITCH="INSTALL_NODE_EXPORTER"
+
 # Version des Node Exporters - hier anpassbar, mehr ist nicht nötig.
 NE_VERSION="1.7.0"
 NE_ARCH="linux-amd64"
