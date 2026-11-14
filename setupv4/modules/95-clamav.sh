@@ -11,6 +11,12 @@
 #
 # Config:
 #   INSTALL_CLAMAV  - ClamAV einrichten (Default false)
+#
+# Das Modul läuft, wenn INSTALL_CLAMAV gesetzt ist ODER wenn es vom Benutzer
+# gesondert benannt wurde (--modules oder eine Nummer in der interaktiven
+# Auswahl). Bei einer Sammelauswahl ("Komplettes Setup", "alle", MODULES aus
+# der Config) entscheidet allein der Schalter - sonst liefe das Modul ohne
+# gewünschte Einrichtung und scheiterte an der Paketinstallation.
 # ==============================================================================
 
 MODULE_ID="clamav"
@@ -27,11 +33,12 @@ clamav_installed() {
 }
 
 module_main() {
-    if ! config_bool INSTALL_CLAMAV; then
-        # INSTALL_CLAMAV ist die Voreinstellung aus der Config. Das Modul wurde
-        # aber explizit ausgewählt - es läuft damit wie der direkt gewählte
-        # Menüpunkt in setupv3.
-        debug "INSTALL_CLAMAV ist nicht gesetzt - das Modul wurde aber explizit ausgewählt."
+    # Der Schalter entscheidet, ob das Modul bei einer Sammelauswahl läuft.
+    # Wurde das Modul gesondert benannt (--modules oder Nummer in der
+    # interaktiven Auswahl), läuft es auch ohne gesetzten Schalter.
+    if ! module_switch_enabled INSTALL_CLAMAV; then
+        skip "INSTALL_CLAMAV ist nicht gesetzt - ClamAV wird nicht eingerichtet."
+        return 1
     fi
 
     echo ""
@@ -66,6 +73,11 @@ module_status() {
 # show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
 # die Tabelle zerreissen.
 module_audit() {
+    if ! module_switch_enabled INSTALL_CLAMAV; then
+        echo "info|ClamAV nicht angefordert|INSTALL_CLAMAV ist nicht gesetzt"
+        return 0
+    fi
+
     if ! clamav_installed; then
         echo "abweichung|Modul wurde ausgewählt, aber weder Paket noch freshclam gefunden|ClamAV fehlt"
         return 0

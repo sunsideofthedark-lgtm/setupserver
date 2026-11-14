@@ -24,6 +24,12 @@
 #   KOMODO_ENDPOINT  - Core-Adresse, z. B. komodo.example.com oder 192.168.1.100:9120
 #   KOMODO_PASSKEY   - Onboarding Key; besser über Umgebung oder --set setzen
 #
+# Das Modul läuft, wenn INSTALL_KOMODO gesetzt ist ODER wenn es vom Benutzer
+# gesondert benannt wurde (--modules oder eine Nummer in der interaktiven
+# Auswahl). Bei einer Sammelauswahl ("Komplettes Setup", "alle", MODULES aus
+# der Config) entscheidet allein der Schalter - sonst liefe das Modul ohne
+# gewünschte Einrichtung und scheiterte an fehlenden Voraussetzungen.
+#
 # Hinweis: FIREWALL_HOSTS_KOMODO wird hier bewusst NICHT ausgewertet - die
 # Firewall-Regeln gehören dem Firewall-Modul, nicht diesem hier.
 # ==============================================================================
@@ -75,15 +81,22 @@ module_main() {
     debug "Starte Komodo Periphery v2 Installation"
     log_action "KOMODO" "Starting Komodo Periphery v2 installation"
 
-    if ! config_bool INSTALL_KOMODO; then
-        debug "INSTALL_KOMODO ist nicht gesetzt - das Modul wurde aber explizit ausgewählt."
+    # Der Schalter entscheidet, ob das Modul bei einer Sammelauswahl läuft.
+    # Wurde das Modul gesondert benannt (--modules oder Nummer in der
+    # interaktiven Auswahl), läuft es auch ohne gesetzten Schalter.
+    if ! module_switch_enabled INSTALL_KOMODO; then
+        skip "INSTALL_KOMODO ist nicht gesetzt - Komodo Periphery wird nicht eingerichtet."
+        return 1
     fi
 
+    # Docker ist eine Voraussetzung, kein Fehler des Moduls: fehlt es, ist das
+    # Modul schlicht nicht anwendbar (Skip). Der Benutzer kann Docker über das
+    # Modul 'docker' nachinstallieren und dieses Modul danach erneut starten.
     if ! command -v docker >/dev/null 2>&1; then
-        error "Docker ist für Komodo Periphery erforderlich!"
-        error "Bitte zuerst das Modul 'docker' ausführen und danach dieses erneut starten."
-        log_action "KOMODO" "Docker not installed"
-        return 2
+        skip "Docker ist nicht installiert - Komodo Periphery wird nicht eingerichtet."
+        info "Docker über das Modul 'docker' nachinstallieren und dieses Modul danach erneut starten."
+        log_action "KOMODO" "Docker not installed - module skipped"
+        return 1
     fi
 
     if komodo_running; then
@@ -282,6 +295,11 @@ module_status() {
 # die Tabelle zerreissen.
 module_audit() {
     local compose_file="${KOMODO_DEFAULT_ROOT_DIR}/compose.yml"
+
+    if ! module_switch_enabled INSTALL_KOMODO; then
+        echo "info|Komodo Periphery nicht angefordert|INSTALL_KOMODO ist nicht gesetzt"
+        return 0
+    fi
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "info|Komodo nicht bewertbar|Docker ist nicht installiert - ohne Docker laeuft kein Periphery-Agent"

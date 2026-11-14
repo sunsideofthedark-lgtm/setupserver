@@ -21,6 +21,12 @@
 #   PANGOLIN_SPK      - Site Provisioning Key (spk-...); besser über Umgebung
 #                       oder --set setzen
 #
+# Das Modul läuft, wenn INSTALL_PANGOLIN gesetzt ist ODER wenn es vom Benutzer
+# gesondert benannt wurde (--modules oder eine Nummer in der interaktiven
+# Auswahl). Bei einer Sammelauswahl ("Komplettes Setup", "alle", MODULES aus
+# der Config) entscheidet allein der Schalter - sonst liefe das Modul ohne
+# gewünschte Einrichtung und scheiterte an fehlenden Voraussetzungen.
+#
 # Der Endpoint wird interaktiv erfragt (Standard
 # https://pangolin.sunriseing.dev) und auf https:// normalisiert.
 #
@@ -79,15 +85,22 @@ module_main() {
     debug "Starte Pangolin SPK Provisioning Setup"
     log_action "PANGOLIN_SPK" "Starting Pangolin SPK provisioning setup"
 
-    if ! config_bool INSTALL_PANGOLIN; then
-        debug "INSTALL_PANGOLIN ist nicht gesetzt - das Modul wurde aber explizit ausgewählt."
+    # Der Schalter entscheidet, ob das Modul bei einer Sammelauswahl läuft.
+    # Wurde das Modul gesondert benannt (--modules oder Nummer in der
+    # interaktiven Auswahl), läuft es auch ohne gesetzten Schalter.
+    if ! module_switch_enabled INSTALL_PANGOLIN; then
+        skip "INSTALL_PANGOLIN ist nicht gesetzt - Pangolin SPK-Provisioning wird nicht eingerichtet."
+        return 1
     fi
 
+    # Docker ist eine Voraussetzung, kein Fehler des Moduls: fehlt es, ist das
+    # Modul schlicht nicht anwendbar (Skip). Der Benutzer kann Docker über das
+    # Modul 'docker' nachinstallieren und dieses Modul danach erneut starten.
     if ! command -v docker >/dev/null 2>&1; then
-        error "Docker ist für Pangolin SPK Provisioning erforderlich!"
-        error "Bitte zuerst das Modul 'docker' ausführen und danach dieses erneut starten."
-        log_action "PANGOLIN_SPK" "Docker not installed"
-        return 2
+        skip "Docker ist nicht installiert - Pangolin SPK-Provisioning wird nicht eingerichtet."
+        info "Docker über das Modul 'docker' nachinstallieren und dieses Modul danach erneut starten."
+        log_action "PANGOLIN_SPK" "Docker not installed - module skipped"
+        return 1
     fi
 
     echo ""
@@ -309,6 +322,11 @@ module_audit() {
     site_name="$(hostname)"
     config_dir="${PANGOLIN_STACK_BASE}/newt_${site_name}"
     config_file="${config_dir}/config.json"
+
+    if ! module_switch_enabled INSTALL_PANGOLIN; then
+        echo "info|Pangolin SPK-Provisioning nicht angefordert|INSTALL_PANGOLIN ist nicht gesetzt"
+        return 0
+    fi
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "info|Pangolin nicht bewertbar|Docker ist nicht installiert - der Newt-Container setzt Docker voraus"
