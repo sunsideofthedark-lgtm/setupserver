@@ -96,6 +96,12 @@ FIREWALL_DOCKER_PORTS=""       # Ports, die trotz Docker offen bleiben duerfen
 FIREWALL_DOCKER_EXT_IF="eth0"  # externes Interface fuer die DOCKER-USER-Regeln
 
 # --- Software ---
+# Diese Schalter steuern, welche Software eingerichtet wird. Beim interaktiven
+# Lauf fragt das Setup zuerst eine Auswahl ab und schreibt sie auf Wunsch
+# zurueck - diese Datei ist damit die dauerhafte Antwort darauf.
+#
+# Docker ist standardmaessig AN: Komodo, Pangolin, NetBird und das
+# Docker-Port-Audit setzen es voraus. Im Auswahlmenue bleibt es abwaehlbar.
 INSTALL_DOCKER=true
 INSTALL_NODEJS=false
 INSTALL_NGINX=false

@@ -95,6 +95,52 @@ Welche Module ausführen?
 Ohne Terminal (cron, Ansible, CI) startet das Menü nicht — der Lauf bricht
 dann ab und verweist auf `--modules` bzw. `--non-interactive`, statt zu hängen.
 
+### Software-Auswahl
+
+Punkt 1 („Komplettes Setup“) fragt zuerst ab, **welche Software** eingerichtet
+werden soll. Die Systemmodule (Systemupdate, Hostname, Zeitzone, Benutzer,
+SSH-Härtung, Firewall, Wartung …) laufen immer mit — auswählbar ist nur die
+installierbare Software:
+
+```
+  Software-Auswahl
+============================================================
+
+  Welche Software soll eingerichtet werden?
+
+   1) [x] Docker                         docker
+   2) [ ] ZFS ARC-Cache                  zfs-arc
+   3) [ ] Node.js                        nodejs
+   4) [ ] Zot-Registry-Mirrors           zot-mirrors
+   5) [ ] NetBird                        netbird
+   6) [ ] Fail2Ban                       fail2ban
+   7) [ ] CrowdSec                       crowdsec
+   8) [ ] NGINX Webserver                nginx
+   9) [ ] Prometheus Node Exporter       node-exporter
+  10) [ ] Monitoring- und Alltagswerkzeuge monitoring-tools
+  11) [ ] Komodo Periphery Agent         komodo
+  12) [ ] Pangolin SPK Provisioning      pangolin
+  13) [ ] Git SSH-Keys                   git-ssh
+  14) [ ] ClamAV Antivirus               clamav
+  15) [ ] Omnisight Agent                omnisight
+
+  Nummern zum Umschalten (z. B. 2,5,7-9) | alle | keine
+  (Enter ohne Eingabe = Auswahl unveraendert lassen)
+  >
+```
+
+Die Voreinstellung kommt aus der Konfiguration: ein gesetzter `INSTALL_*`-Schalter
+ist angehakt. **Docker ist standardmäßig aktiv**, weil Komodo, Pangolin,
+NetBird und das Docker-Port-Audit es voraussetzen — es bleibt aber abwählbar.
+
+Die Auswahl gilt für den laufenden Durchgang. Ist eine Konfigurationsdatei
+geladen, fragt das Setup danach, ob die Auswahl in die Datei zurückgeschrieben
+werden soll (mit Sicherung der Originaldatei). Ohne geladene Config gilt die
+Auswahl nur für diesen Lauf.
+
+Die Softwaremodule, die nicht angehakt sind, erscheinen im Modulplan als
+„nicht ausgewählt — wird übersprungen“ und laufen nicht.
+
 ## Optionen
 
 | Option | Bedeutung |
@@ -172,36 +218,39 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 
 ## Module
 
-| # | ID | Name | Schalter |
-|---|-----|------|----------|
-| 10 | `system-update` | Systemaktualisierung | `SYSTEM_UPDATE` |
-| 20 | `auto-updates` | Automatische Sicherheitsupdates | `AUTO_UPDATES` |
-| 30 | `hostname` | Server-Hostname | `SET_HOSTNAME`, `SERVER_HOSTNAME` |
-| 40 | `timezone` | Zeitzone + NTP | `SET_TIMEZONE`, `TIMEZONE` |
-| 45 | `tuning` | System-Tuning | `TUNING_SYSCTL`, `TUNING_SWAP`, `TUNING_JOURNALD` |
-| 50 | `users` | Benutzerverwaltung | `ADMIN_USER`, `CREATE_BACKUP_USER`, `CREATE_SHARED_DIR` |
-| 55 | `sftp-sudoers` | SFTP-Sudoers-Regel | `SFTP_SUDOERS`, `ADMIN_USER` |
-| 60 | `ssh-hardening` | SSH-Härtung | `SSH_PORT`, `DISABLE_ROOT_LOGIN`, `SSH_ALLOWED_USERS` |
-| 70 | `firewall` | Firewall | `FIREWALL_OPEN_WEB_PORTS`, `FIREWALL_EXTRA_PORTS`, … |
-| 71 | `docker-firewall` | Docker-Port-Audit | `FIREWALL_DOCKER_USER`, `FIREWALL_DOCKER_PORTS` |
-| 80 | `docker` | Docker + `daemon.json` | `INSTALL_DOCKER` |
-| 82 | `zfs-arc` | ZFS ARC-Cache | `INSTALL_ZFS_ARC` |
-| 84 | `nodejs` | Node.js / npm | `INSTALL_NODEJS` |
-| 85 | `zot-mirrors` | Zot-Registry-Mirrors | `ZOT_MIRRORS`, `ZOT_ENDPOINT`, `ZOT_API_KEY` |
-| 86 | `netbird` | NetBird Mesh-VPN | `INSTALL_NETBIRD`, `NETBIRD_MGMT_URL`, `NETBIRD_SETUP_KEY` |
-| 87 | `fail2ban` | Fail2Ban | `INSTALL_FAIL2BAN` |
-| 88 | `crowdsec` | CrowdSec + Bouncer | `INSTALL_CROWDSEC` |
-| 89 | `nginx` | NGINX | `INSTALL_NGINX` |
-| 90 | `node-exporter` | Prometheus Node Exporter | `INSTALL_NODE_EXPORTER` |
-| 91 | `monitoring-tools` | htop, iotop, nethogs, ncdu, tmux, git, zip | `INSTALL_HTOP`, `INSTALL_NCUDU`, … |
-| 92 | `komodo` | Komodo Periphery | `INSTALL_KOMODO`, `KOMODO_PASSKEY` |
-| 93 | `pangolin` | Pangolin SPK / Newt | `INSTALL_PANGOLIN`, `PANGOLIN_SPK` |
-| 94 | `git-ssh` | Git SSH-Keys (GitHub, Forgejo, Gitea) | `INSTALL_GIT_SSH`, `GIT_SSH_SERVICES`, `GIT_KEY_COMMENT_DOMAIN` |
-| 95 | `clamav` | ClamAV | `INSTALL_CLAMAV` |
-| 96 | `omnisight` | Omnisight Agent | `INSTALL_OMNISIGHT`, `OMNISIGHT_URL`, `OMNISIGHT_TOKEN`, `OMNISIGHT_ROLE` |
-| 97 | `maintenance` | Wartung + Cron | `MAINTENANCE_LOGROTATE`, `MAINTENANCE_DISK_MONITOR` |
-| 98 | `root-disable` | Root deaktivieren | `DISABLE_ROOT_LOGIN` |
-| 99 | `verify` | Netzwerk-/Docker-Verifikation | — |
+| # | ID | Name | Art | Schalter |
+|---|-----|------|-----|----------|
+| 10 | `system-update` | Systemaktualisierung | System | `SYSTEM_UPDATE` |
+| 20 | `auto-updates` | Automatische Sicherheitsupdates | System | `AUTO_UPDATES` |
+| 30 | `hostname` | Server-Hostname | System | `SET_HOSTNAME`, `SERVER_HOSTNAME` |
+| 40 | `timezone` | Zeitzone + NTP | System | `SET_TIMEZONE`, `TIMEZONE` |
+| 45 | `tuning` | System-Tuning | System | `TUNING_SYSCTL`, `TUNING_SWAP`, `TUNING_JOURNALD` |
+| 50 | `users` | Benutzerverwaltung | System | `ADMIN_USER`, `CREATE_BACKUP_USER`, `CREATE_SHARED_DIR` |
+| 55 | `sftp-sudoers` | SFTP-Sudoers-Regel | System | `SFTP_SUDOERS`, `ADMIN_USER` |
+| 60 | `ssh-hardening` | SSH-Härtung | System | `SSH_PORT`, `DISABLE_ROOT_LOGIN`, `SSH_ALLOWED_USERS` |
+| 70 | `firewall` | Firewall | System | `FIREWALL_OPEN_WEB_PORTS`, `FIREWALL_EXTRA_PORTS`, … |
+| 71 | `docker-firewall` | Docker-Port-Audit | System | `FIREWALL_DOCKER_USER`, `FIREWALL_DOCKER_PORTS` |
+| 80 | `docker` | Docker + `daemon.json` | **Software** | `INSTALL_DOCKER` (Standard: an) |
+| 82 | `zfs-arc` | ZFS ARC-Cache | **Software** | `INSTALL_ZFS_ARC` |
+| 84 | `nodejs` | Node.js / npm | **Software** | `INSTALL_NODEJS` |
+| 85 | `zot-mirrors` | Zot-Registry-Mirrors | **Software** | `ZOT_MIRRORS`, `ZOT_ENDPOINT`, `ZOT_API_KEY` |
+| 86 | `netbird` | NetBird Mesh-VPN | **Software** | `INSTALL_NETBIRD`, `NETBIRD_MGMT_URL`, `NETBIRD_SETUP_KEY` |
+| 87 | `fail2ban` | Fail2Ban | **Software** | `INSTALL_FAIL2BAN` |
+| 88 | `crowdsec` | CrowdSec + Bouncer | **Software** | `INSTALL_CROWDSEC` |
+| 89 | `nginx` | NGINX | **Software** | `INSTALL_NGINX` |
+| 90 | `node-exporter` | Prometheus Node Exporter | **Software** | `INSTALL_NODE_EXPORTER` |
+| 91 | `monitoring-tools` | htop, iotop, nethogs, ncdu, tmux, git, zip | **Software** | `INSTALL_HTOP`, `INSTALL_NCUDU`, … |
+| 92 | `komodo` | Komodo Periphery | **Software** | `INSTALL_KOMODO`, `KOMODO_PASSKEY` |
+| 93 | `pangolin` | Pangolin SPK / Newt | **Software** | `INSTALL_PANGOLIN`, `PANGOLIN_SPK` |
+| 94 | `git-ssh` | Git SSH-Keys (GitHub, Forgejo, Gitea) | **Software** | `INSTALL_GIT_SSH`, `GIT_SSH_SERVICES`, `GIT_KEY_COMMENT_DOMAIN` |
+| 95 | `clamav` | ClamAV | **Software** | `INSTALL_CLAMAV` |
+| 96 | `omnisight` | Omnisight Agent | **Software** | `INSTALL_OMNISIGHT`, `OMNISIGHT_URL`, `OMNISIGHT_TOKEN`, `OMNISIGHT_ROLE` |
+| 97 | `maintenance` | Wartung + Cron | System | `MAINTENANCE_LOGROTATE`, `MAINTENANCE_DISK_MONITOR` |
+| 98 | `root-disable` | Root deaktivieren | System | `DISABLE_ROOT_LOGIN` |
+| 99 | `verify` | Netzwerk-/Docker-Verifikation | System | — |
+
+Die Spalte **Art** entscheidet, was im Software-Auswahlmenü erscheint: nur die
+Softwaremodule sind wählbar, die Systemmodule laufen immer mit.
 
 `--list` zeigt die Liste immer aktuell an, `--status` prüft den Zustand.
 
