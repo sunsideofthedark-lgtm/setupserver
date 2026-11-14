@@ -205,16 +205,213 @@ gitssh_apply_perms() {
     return 0
 }
 
+# Ermittelt die Paketarchitektur des Systems.
+#
+# Wichtig: die Auflösung passiert hier in Bash und NICHT in einer Subshell
+# innerhalb eines sh -c-Payloads. Dort ist eine Command-Substitution in
+# einfachen Anfuehrungszeichen nie expandiert worden - genau daraus ist der
+# apt-Bug entstanden (siehe gitssh_write_apt_source).
+#
+# Fehlt dpkg (etwa auf einer fremden Distribution), wird auf amd64
+# zurueckgefallen - "arch=" wird von apt in jedem Fall erwartet.
+gitssh_detect_arch() {
+    local arch=""
+
+    if command -v dpkg >/dev/null 2>&1; then
+        arch="$(dpkg --print-architecture 2>/dev/null || true)"
+    fi
+
+    [ -n "$arch" ] || arch="amd64"
+    printf '%s' "$arch"
+}
+
+# Prueft eine apt-Quellliste.
+#
+# apt bricht mit "E: Malformed entry ... ([option] not assignment)" ab,
+# wenn die Zeile nicht mit "deb " beginnt oder noch eine unaufgeloeste
+# Command-Substitution enthaelt. Genau das hat den Server lahmgelegt:
+# JEDER spaetere apt-Lauf scheiterte, damit auch jede Paketinstallation.
+#
+# Rueckgabe: 0 = gueltig, 1 = ungueltig (Begruendung steht im Debug-Log).
+gitssh_apt_source_verify() {
+    local target="$1"
+    local content=""
+
+    if [ ! -f "$target" ]; then
+        debug "apt-Quellliste fehlt: ${target}"
+        return 1
+    fi
+
+    content="$(cat "$target" 2>/dev/null || true)"
+
+    if [[ "$content" != "deb "* ]]; then
+        debug "apt-Quellliste beginnt nicht mit 'deb ': ${target}"
+        return 1
+    fi
+
+    if [[ "$content" == *'$('* ]]; then
+        debug "apt-Quellliste enthaelt noch eine Command-Substitution: ${target}"
+        return 1
+    fi
+
+    if [[ "$content" == *"arch=\$(dpkg"* ]]; then
+        debug "apt-Quellliste enthaelt noch 'arch=\$(dpkg': ${target}"
+        return 1
+    fi
+
+    return 0
+}
+
+# Baut eine apt-Quellliste zurueck: die gesicherte Fassung wird wieder
+#hergestellt oder die Datei entfernt. Ein kaputtes Quellenverzeichnis darf
+# auf keinem Fall zurueckbleiben - sonst ist apt auf dem Server unbrauchbar.
+gitssh_apt_source_rollback() {
+    local target="$1"
+
+    if [ -n "${GITS_APT_ROLLBACK:-}" ] && [ -f "$GITS_APT_ROLLBACK" ]; then
+        if cp -p "$GITS_APT_ROLLBACK" "$target" 2>/dev/null; then
+            rm -f "$GITS_APT_ROLLBACK"
+            GITS_APT_ROLLBACK=""
+            warning "apt-Quellliste auf die gesicherte Fassung zurueckgesetzt: ${target}"
+            return 0
+        fi
+    fi
+
+    rm -f "$target" 2>/dev/null || true
+    if [ -n "${GITS_APT_ROLLBACK:-}" ]; then
+        rm -f "$GITS_APT_ROLLBACK"
+    fi
+    GITS_APT_ROLLBACK=""
+    warning "apt-Quellliste entfernt, damit apt weiter funktioniert: ${target}"
+    return 0
+}
+
+# Entfernt den Rueckbau-Snapshot der apt-Quellliste.
+#
+# Er wird nur gebraucht, solange die Quelle noch nicht bestaetigt ist -
+# die dauerhafte Sicherung liegt im Backup-Verzeichnis. Ohne dieses
+# Aufraeumen bliebe eine Datei "github-cli.list.rollback.XXXXXX" im
+# Verzeichnis /etc/apt/sources.list.d liegen.
+gitssh_apt_source_snapshot_cleanup() {
+    if [ -n "${GITS_APT_ROLLBACK:-}" ] && [ -f "$GITS_APT_ROLLBACK" ]; then
+        rm -f "$GITS_APT_ROLLBACK"
+    fi
+    GITS_APT_ROLLBACK=""
+}
+
+# Schreibt die apt-Quellliste fuer die GitHub CLI.
+#
+# REGRESSION (2026-11): die frueherere Variante
+#   run_cmd sh -c "echo 'deb [arch=\$(dpkg --print-architecture) ...]' > datei"
+# hat wörtlich "arch=$(dpkg --print-architecture)" in die Datei geschrieben,
+# weil die Command-Substitution in einfachen Anfuehrungszeichen nicht
+# expandiert wird. apt meldete danach bei JEDEM Lauf "Malformed entry" und
+# brach alle weiteren Paketinstallationen ab (logrotate, clamav).
+#
+# Deshalb wird die Architektur vorher in Bash aufgeloest und die fertige
+# Zeile ohne jede Substitution geschrieben. Zusaetzlich wird die Datei
+# nach dem Schreiben geprueft und im Fehlerfall zurueckgebaut.
+#
+# $1 = Zieldatei (in Produktion /etc/apt/sources.list.d/github-cli.list)
+GITS_APT_ROLLBACK=""
+
+gitssh_write_apt_source() {
+    local target="$1"
+    local arch line tmp content
+
+    arch="$(gitssh_detect_arch)"
+    line="deb [arch=${arch} signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+
+    if [ "$DRY_RUN" = "1" ]; then
+        echo -e "${C_MAGENTA}[DRY-RUN] wuerde ${target} schreiben:${C_RESET}" >&2
+        echo "  ${line}" >&2
+        return 0
+    fi
+
+    # Vor dem Ueberschreiben sichern - fehlt die Datei, ist das kein Fehler.
+    create_backup "$target"
+
+    # Zweite, genau passende Sicherung fuer den Rueckbau: create_backup legt
+    # eine zeitgestempelte Datei im Backup-Verzeichnis ab, die sich spaeter
+    # nicht mehr eindeutig zuordnen laesst.
+    GITS_APT_ROLLBACK=""
+    if [ -f "$target" ]; then
+        tmp="$(mktemp "${target}.rollback.XXXXXX" 2>/dev/null || true)"
+        if [ -n "$tmp" ] && cp -p "$target" "$tmp" 2>/dev/null; then
+            GITS_APT_ROLLBACK="$tmp"
+        else
+            [ -n "$tmp" ] && rm -f "$tmp"
+            warning "Kein Rueckbau-Snapshot von ${target} moeglich - im Fehlerfall wird die Datei entfernt."
+        fi
+    fi
+
+    # Ueber eine Zwischendatei schreiben: so entsteht keine halbe Datei,
+    # wenn der Schreibvorgang abbricht.
+    tmp="$(mktemp "${target}.XXXXXX" 2>/dev/null || true)"
+    if [ -z "$tmp" ]; then
+        error "Temporaerdeatei fuer die apt-Quellliste konnte nicht angelegt werden."
+        return 1
+    fi
+
+    if ! printf '%s\n' "$line" > "$tmp"; then
+        rm -f "$tmp"
+        error "apt-Quellliste konnte nicht geschrieben werden: ${target}"
+        return 1
+    fi
+
+    if ! cat "$tmp" > "$target"; then
+        rm -f "$tmp"
+        error "apt-Quellliste konnte nicht an ${target} uebergeben werden."
+        return 1
+    fi
+    rm -f "$tmp"
+    chmod 644 "$target" 2>/dev/null || true
+
+    # Der Inhalt wird noch einmal von der Platte gelesen - geschrieben ist
+    # geschrieben. Passt er nicht, bleibt keine kaputte apt-Liste zurueck.
+    content="$(cat "$target" 2>/dev/null || true)"
+    if ! gitssh_apt_source_verify "$target"; then
+        error "apt-Quellliste ist ungueltig - sie wird zurueckgebaut, damit apt nicht kaputt bleibt."
+        gitssh_apt_source_rollback "$target"
+        return 1
+    fi
+
+    debug "apt-Quellliste geschrieben: ${target} (${content})"
+    return 0
+}
+
 # Installiert die GitHub CLI je nach Distribution - nur für github.com
 gitssh_install_cli() {
+    local apt_list
     install_package "curl" || return 1
 
     case "$OS_ID" in
         ubuntu|debian)
+            apt_list="/etc/apt/sources.list.d/github-cli.list"
+
             run_cmd curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
                 -o /usr/share/keyrings/githubcli-archive-keyring.gpg || return 1
-            run_cmd sh -c "echo 'deb [arch=\$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' > /etc/apt/sources.list.d/github-cli.list" || return 1
-            run_eval "$PKG_UPDATE" || return 1
+
+            # Die Architektur ist bereits aufgeloest - die Zeile entsteht
+            # ohne Command-Substitution und damit ohne "Malformed entry".
+            if ! gitssh_write_apt_source "$apt_list"; then
+                error "Die apt-Quellliste fuer die GitHub CLI konnte nicht geschrieben werden."
+                return 1
+            fi
+
+            # Ein fehlgeschlagener apt-Lauf darf nicht auf dem System
+            # bleiben: die Quelle wird zurueckgebaut, damit apt benutzbar
+            # bleibt und die naechsten Module nicht scheitern.
+            if ! run_eval "$PKG_UPDATE"; then
+                error "apt update ist fehlgeschlagen - die GitHub-CLI-Quelle wird zurueckgebaut."
+                gitssh_apt_source_rollback "$apt_list"
+                return 1
+            fi
+
+            # Die Quelle ist bestaetigt - der Rueckbau-Snapshot wird nicht
+            # mehr gebraucht und kann verschwinden.
+            gitssh_apt_source_snapshot_cleanup
+
             install_package "gh" || return 1
             ;;
         centos|rhel|rocky|almalinux|fedora|opensuse*|sles|arch)
@@ -451,9 +648,60 @@ gitssh_ensure_key() {
 #   1. GIT_SSH_TOKEN_<KURZNAME> aus der Umgebung oder --set
 #   2. interaktive verdeckte Abfrage
 # Gibt das Token auf stdout aus, legt den Status in $GITS_TOKEN_STATE ab
-# (found / asked / missing).
+# (found / asked / missing / empty).
+# "empty" = der Benutzer wollte die API-Registrierung, hat aber keinen
+# Token abgegeben - das Modul bricht in dem Fall ab.
 GITS_TOKEN_STATE=""
 GITS_RESOLVED_TOKEN=""
+
+# Liest einen API-Token verdeckt ein (nie im Log, nie in der History).
+#
+# Anders als der Helfer ask_secret bricht diese Abfrage bei leerer Eingabe
+# sofort ab: ein leerer Token darf nicht bis zum API-Aufruf durchrutschen.
+# Dort wuerde er als HTTP 401 ("Berechtigung oder Token falsch") gemeldet
+# und die eigentliche Ursache - es wurde gar kein Token abgegeben -
+# verschleiert.
+#
+# $1 = Prompt, $2 = Name der Zielvariablen
+gitssh_ask_token() {
+    local prompt="$1" varname="$2"
+    local input="" confirm_input="" attempt=0
+
+    while [ "$attempt" -lt 3 ]; do
+        attempt=$((attempt + 1))
+        echo -e "${C_CYAN}${prompt}: ${C_RESET}" >&2
+        if ! read -rs input; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfuegbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
+        echo "" >&2
+
+        if [ -z "$input" ]; then
+            # Leerer Token: hier abbrechen, nicht weiterfragen.
+            return 1
+        fi
+
+        echo -e "${C_CYAN}${prompt} (wiederholen): ${C_RESET}" >&2
+        if ! read -rs confirm_input; then
+            echo "" >&2
+            error "Keine Eingabe mehr verfuegbar (EOF) - Abfrage abgebrochen."
+            return 1
+        fi
+        echo "" >&2
+
+        if [ "$input" = "$confirm_input" ]; then
+            printf -v "$varname" '%s' "$input"
+            unset confirm_input
+            return 0
+        fi
+
+        warning "Die Eingaben stimmen nicht ueberein - bitte erneut eingeben."
+    done
+
+    error "Der Token wurde dreimal nicht bestaetigt - Abfrage abgebrochen."
+    return 1
+}
 
 gitssh_resolve_token() {
     local short="$1"
@@ -475,8 +723,13 @@ gitssh_resolve_token() {
 
     echo ""
     if ask_yes_no "Soll der Key automatisch über die API bei $short registriert werden? (Token erforderlich)" "n"; then
-        if ! ask_secret "API-Token für $short" GITS_RESOLVED_TOKEN; then
+        if ! gitssh_ask_token "API-Token für $short" GITS_RESOLVED_TOKEN; then
+            # Leerer Token (oder abgebrochene Eingabe): es darf kein
+            # API-Aufruf mit leerem Token erfolgen. Der Zustand "empty"
+            # unterscheidet diesen Fall von "der Benutzer will die API
+            # gar nicht" - nur dort bricht das Modul ab.
             GITS_RESOLVED_TOKEN=""
+            GITS_TOKEN_STATE="empty"
             return 1
         fi
         GITS_TOKEN_STATE="asked"
@@ -484,6 +737,7 @@ gitssh_resolve_token() {
     fi
 
     GITS_RESOLVED_TOKEN=""
+    GITS_TOKEN_STATE="missing"
     return 1
 }
 
@@ -754,14 +1008,19 @@ module_main() {
     local generic_key generic_needed=0 github_authed=0
     local short_name
 
+    # Der Schalter entscheidet, ob das Modul laeuft. module_switch_enabled
+    # gibt auch dann 0 zurueck, wenn der Benutzer das Modul gesondert
+    # benannt hat (--modules oder Nummer) - dann laeuft es auch ohne
+    # gesetzten Schalter.
+    if ! module_switch_enabled INSTALL_GIT_SSH; then
+        skip "INSTALL_GIT_SSH ist nicht gesetzt - Git-SSH-Keys werden nicht eingerichtet."
+        return 1
+    fi
+
     echo ""
     info "Richte Git SSH-Keys ein..."
     debug "Starte Git SSH-Key Setup"
     log_action "GIT_SSH" "Starting git ssh key setup"
-
-    if ! config_bool INSTALL_GIT_SSH; then
-        debug "INSTALL_GIT_SSH ist nicht gesetzt - das Modul wurde aber explizit ausgewählt."
-    fi
 
     gitssh_parse_services
     if [ ${#GITS_SERVICES[@]} -eq 0 ]; then
@@ -982,6 +1241,16 @@ module_main() {
         fi
 
         if ! gitssh_resolve_token "$short"; then
+            if [ "$GITS_TOKEN_STATE" = "empty" ]; then
+                # Der Benutzer wollte die API-Registrierung, hat aber keinen
+                # Token abgegeben. Es darf kein API-Aufruf mit leerem Token
+                # erfolgen - der waere als HTTP 401 gemeldet worden und haette
+                # die eigentliche Ursache verschleiert. Das Modul bricht ab;
+                # ohne Token bleibt nur der manuelle Weg.
+                skip "Kein API-Token fuer $short - ohne Token ist nur die manuelle Variante moeglich."
+                skip "Bitte den oeffentlichen Key in der Weboberflaeche von $short hinterlegen."
+                return 1
+            fi
             manual=$((manual + 1))
             continue
         fi
@@ -1085,7 +1354,7 @@ module_audit() {
     local target_user ssh_dir entry host short own missing=""
     local have=0 total=0
 
-    if ! config_bool INSTALL_GIT_SSH; then
+    if ! module_switch_enabled INSTALL_GIT_SSH; then
         echo "info|Keine Git-SSH-Keys angefordert|INSTALL_GIT_SSH ist nicht gesetzt"
         return 0
     fi
