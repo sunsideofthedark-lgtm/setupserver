@@ -64,6 +64,16 @@ SSH_ALLOWED_USERS=""          # z. B. "sugo,deploy"
 SSH_NETBIRD_ONLY=false
 
 # --- Benutzerverwaltung ---
+# Name des Admin-Accounts. Leer = das Setup fragt interaktiv nach und legt
+# den Benutzer an. Wird der Name hier gesetzt, wird der Benutzer beim
+# naechsten Lauf neu erzeugt (mit neuem SSH-Schluessel) - ein bereits
+# vorhandener Benutzer wird gefragt.
+#
+# WICHTIG: Der hier eingetragene Benutzer ist auch der, fuer den die
+# SSH-Haertung, die SFTP-Sudoers-Regel und die Git-Keys eingerichtet werden.
+# Ohne diese Angabe bleibt ADMIN_USER zur Laufzeit leer und die Module, die
+# ihn brauchen, werden uebersprungen.
+ADMIN_USER=""                  # z. B. "sugo"
 CREATE_BACKUP_USER=false
 DB_BACKUP_USER="dbbackup"
 CREATE_SHARED_DIR=false
@@ -133,6 +143,20 @@ git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev"
 # Ohne Token bleibt der manuelle Weg: der oeffentliche Key wird ausgegeben und
 # muss in der Weboberflaeche hinterlegt werden.
 INSTALL_CLAMAV=false
+
+# --- Omnisight-Agent ---
+INSTALL_OMNISIGHT=false
+OMNISIGHT_URL="https://omnisight.sunriseing.dev"
+OMNISIGHT_ROLE="linux"
+# URL des Installationsskripts. Leer = aus OMNISIGHT_URL abgeleitet
+# (<url>/agent/install.sh). Tragen Sie hier die tatsaechliche URL Ihrer
+# Instanz ein, sonst wird das Modul mit einem klaren Hinweis uebersprungen.
+OMNISIGHT_INSTALL_URL=""
+# Das Agent-Token ist ein Secret - hier bewusst NICHT eintragen, sondern zur
+# Laufzeit uebergeben:
+#   OMNISIGHT_TOKEN=... sudo -E bash setup.sh --config config/setup.conf
+# oder via --set OMNISIGHT_TOKEN=...
+#OMNISIGHT_TOKEN=""
 
 # --- Zot-Mirrors ---
 ZOT_MIRRORS=false

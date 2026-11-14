@@ -49,6 +49,7 @@ sudo bash setup.sh
 
 # 2. Konfigurationsdatei erzeugen (ausfüllen)
 sudo bash setup.sh --init
+#    -> legt /opt/serversetup/config/setup.conf an
 
 # 3. Nicht-interaktiv mit Config laufen
 sudo bash setup.sh --config config/setup.conf
@@ -57,12 +58,22 @@ sudo bash setup.sh --config config/setup.conf
 sudo /opt/serversetup/setup.sh --status
 ```
 
+`--init` schreibt nach `config/setup.conf` — genau die Datei, die Schritt 3
+lädt. Existiert sie schon, wird sie **nicht** überschrieben (Exit 1 mit
+Hinweis). Ein relativer `--config`-Pfad wird notfalls unter
+`/opt/serversetup/config/` gesucht, damit der Pfad auch nach der
+Selbstinstallation stimmt.
+
+`SETUP_HOME` muss ein **absoluter** Pfad sein (`/opt/serversetup`). Ein
+relativer Pfad wird abgewiesen — sonst legt das Setup im aktuellen
+Arbeitsverzeichnis ein Verzeichnis an.
+
 ### Menü
 
 Start ohne Argumente öffnet ein Menü mit vier Punkten:
 
 ```
-  27 Module verfügbar.
+  28 Module verfügbar.
 
   1. Komplettes Setup      alle Module in Ausführungsreihenfolge
   2. Modulare Auswahl    einzelne Schritte selbst wählen
@@ -97,7 +108,7 @@ dann ab und verweist auf `--modules` bzw. `--non-interactive`, statt zu hängen.
 | `--list` | Verfügbare Module auflisten |
 | `--status` | Status der gewählten Module prüfen |
 | `--audit` | Ist-Zustand gegen die Zielkonfiguration prüfen |
-| `--init` | Beispielkonfiguration erzeugen |
+| `--init` | Startkonfiguration `config/setup.conf` erzeugen |
 | `--no-profile` | Server-Profil ignorieren |
 | `--no-relocate` | Nicht nach `/opt/serversetup` umziehen |
 | `DEBUG=1` | Ausführliche Debug-Ausgabe |
@@ -185,14 +196,37 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 91 | `monitoring-tools` | htop, iotop, nethogs, ncdu, tmux, git, zip | `INSTALL_HTOP`, `INSTALL_NCUDU`, … |
 | 92 | `komodo` | Komodo Periphery | `INSTALL_KOMODO`, `KOMODO_PASSKEY` |
 | 93 | `pangolin` | Pangolin SPK / Newt | `INSTALL_PANGOLIN`, `PANGOLIN_SPK` |
-| 93b | `clamav` | ClamAV | `INSTALL_CLAMAV` |
 | 94 | `git-ssh` | Git SSH-Keys (GitHub, Forgejo, Gitea) | `INSTALL_GIT_SSH`, `GIT_SSH_SERVICES`, `GIT_KEY_COMMENT_DOMAIN` |
-| 94b | `omnisight` | Omnisight Agent | `OMNISIGHT_URL`, `OMNISIGHT_TOKEN`, `OMNISIGHT_ROLE` |
-| 95 | `maintenance` | Wartung + Cron | `MAINTENANCE_LOGROTATE`, `MAINTENANCE_DISK_MONITOR` |
-| 96 | `root-disable` | Root deaktivieren | `DISABLE_ROOT_LOGIN` |
+| 95 | `clamav` | ClamAV | `INSTALL_CLAMAV` |
+| 96 | `omnisight` | Omnisight Agent | `INSTALL_OMNISIGHT`, `OMNISIGHT_URL`, `OMNISIGHT_TOKEN`, `OMNISIGHT_ROLE` |
+| 97 | `maintenance` | Wartung + Cron | `MAINTENANCE_LOGROTATE`, `MAINTENANCE_DISK_MONITOR` |
+| 98 | `root-disable` | Root deaktivieren | `DISABLE_ROOT_LOGIN` |
 | 99 | `verify` | Netzwerk-/Docker-Verifikation | — |
 
 `--list` zeigt die Liste immer aktuell an, `--status` prüft den Zustand.
+
+### Wann läuft ein Modul?
+
+Ein Modul mit eigenem `INSTALL_*`-Schalter (z. B. `INSTALL_DOCKER`) läuft, wenn
+der Schalter gesetzt ist. Bei einer **Sammelauswahl** — Menüpunkt „Komplettes
+Setup“, „alle“, oder die `MODULES`-Liste aus der Config — entscheidet der
+Schalter: ein Modul ohne gesetzten Schalter wird übersprungen, nicht
+aufgerufen.
+
+Wer ein Modul **gesondert und namentlich** benennt, bypassst den Schalter:
+
+```bash
+sudo bash setup.sh --modules git-ssh        # läuft auch ohne INSTALL_GIT_SSH=true
+```
+
+Das gilt für `--modules` auf der Kommandozeile und für die Nummer in der
+interaktiven Modulauswahl. Der Unterschied ist wichtig: beim Komplett-Setup
+hat der Benutzer gerade kein einzelnes Modul ausgewählt — dort darf ein
+Modul nicht laufen, das in der Konfiguration gar nicht aktiviert ist.
+
+Eine fehlende Voraussetzung (z. B. Docker für Komodo) ist kein Fehler, sondern
+heißt „nicht anwendbar“: Das Modul wird übersprungen und in der Zusammenfassung
+als **ÜBERSPRUNGEN** gezählt, nicht als **FEHLER**.
 
 ### Status und Audit
 
