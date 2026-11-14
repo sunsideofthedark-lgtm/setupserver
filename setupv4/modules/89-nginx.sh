@@ -20,7 +20,7 @@ MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("web")
 
 module_main() {
-    if ! config_bool INSTALL_NGINX; then
+    if ! module_switch_enabled INSTALL_NGINX; then
         skip "INSTALL_NGINX ist nicht gesetzt - NGINX wird nicht angefasst."
         return 1
     fi
@@ -76,7 +76,7 @@ module_status() {
 module_audit() {
     local version active="inaktiv"
 
-    if ! config_bool INSTALL_NGINX; then
+    if ! module_switch_enabled INSTALL_NGINX; then
         echo "info|NGINX nicht angefordert|INSTALL_NGINX ist nicht gesetzt"
         return 0
     fi

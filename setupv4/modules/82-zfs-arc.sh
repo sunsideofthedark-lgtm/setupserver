@@ -54,7 +54,7 @@ zfs_show_current() {
 module_main() {
     local zfs_cache_gb cache_bytes
 
-    if ! config_bool INSTALL_ZFS_ARC; then
+    if ! module_switch_enabled INSTALL_ZFS_ARC; then
         skip "ZFS ARC-Cache ist nicht aktiviert (INSTALL_ZFS_ARC=false)."
         return 1
     fi
@@ -144,7 +144,7 @@ module_audit() {
         return 0
     fi
 
-    if ! config_bool INSTALL_ZFS_ARC; then
+    if ! module_switch_enabled INSTALL_ZFS_ARC; then
         echo "info|ARC-Cache nicht angefordert|INSTALL_ZFS_ARC ist nicht gesetzt"
         return 0
     fi

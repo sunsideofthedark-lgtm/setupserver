@@ -219,7 +219,7 @@ netbird_configure() {
 }
 
 module_main() {
-    if ! config_bool INSTALL_NETBIRD; then
+    if ! module_switch_enabled INSTALL_NETBIRD; then
         skip "NetBird ist nicht aktiviert (INSTALL_NETBIRD=false)."
         return 1
     fi
@@ -276,7 +276,7 @@ module_status() {
 module_audit() {
     local addr
 
-    if ! config_bool INSTALL_NETBIRD; then
+    if ! module_switch_enabled INSTALL_NETBIRD; then
         echo "info|NetBird nicht angefordert|INSTALL_NETBIRD ist nicht gesetzt"
         return 0
     fi

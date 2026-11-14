@@ -73,7 +73,7 @@ nodeexporter_open_firewall() {
 module_main() {
     local tmpdir url tarball
 
-    if ! config_bool INSTALL_NODE_EXPORTER; then
+    if ! module_switch_enabled INSTALL_NODE_EXPORTER; then
         skip "INSTALL_NODE_EXPORTER ist nicht gesetzt - Node Exporter wird nicht angefasst."
         return 1
     fi
@@ -179,7 +179,7 @@ module_status() {
 module_audit() {
     local active="inaktiv"
 
-    if ! config_bool INSTALL_NODE_EXPORTER; then
+    if ! module_switch_enabled INSTALL_NODE_EXPORTER; then
         echo "info|Node Exporter nicht angefordert|INSTALL_NODE_EXPORTER ist nicht gesetzt"
         return 0
     fi

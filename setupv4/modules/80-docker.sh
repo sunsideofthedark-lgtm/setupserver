@@ -256,7 +256,7 @@ docker_install() {
 module_main() {
     local swarm_mode=false live_restore
 
-    if ! config_bool INSTALL_DOCKER; then
+    if ! module_switch_enabled INSTALL_DOCKER; then
         skip "Docker ist nicht aktiviert (INSTALL_DOCKER=false)."
         return 1
     fi
@@ -370,7 +370,7 @@ module_status() {
 # Ziel: Docker ist installiert und die daemon.json aktiviert IPv6 - ohne die
 # beiden nächsten Module (Pangolin/NetBird) laeuft auf diesem Server nichts.
 module_audit() {
-    if ! config_bool INSTALL_DOCKER; then
+    if ! module_switch_enabled INSTALL_DOCKER; then
         echo "info|Docker mit daemon.json (IPv6)|INSTALL_DOCKER ist nicht gesetzt"
         return 0
     fi

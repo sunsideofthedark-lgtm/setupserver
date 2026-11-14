@@ -80,7 +80,7 @@ npm_version() {
 }
 
 module_main() {
-    if ! config_bool INSTALL_NODEJS; then
+    if ! module_switch_enabled INSTALL_NODEJS; then
         skip "Node.js ist nicht aktiviert (INSTALL_NODEJS=false)."
         return 1
     fi
@@ -123,7 +123,7 @@ module_status() {
 # show_audit ruft diese Funktion per $( ) auf, jedes zusaetzliche Output wuerde
 # die Tabelle zerreissen.
 module_audit() {
-    if ! config_bool INSTALL_NODEJS; then
+    if ! module_switch_enabled INSTALL_NODEJS; then
         echo "info|Node.js nicht angefordert|INSTALL_NODEJS ist nicht gesetzt"
         return 0
     fi

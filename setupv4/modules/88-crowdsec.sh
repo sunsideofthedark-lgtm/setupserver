@@ -51,7 +51,7 @@ crowdsec_install_collection() {
 module_main() {
     local docker_collection=0
 
-    if ! config_bool INSTALL_CROWDSEC; then
+    if ! module_switch_enabled INSTALL_CROWDSEC; then
         skip "INSTALL_CROWDSEC ist nicht gesetzt - CrowdSec wird nicht angefasst."
         return 1
     fi
@@ -147,7 +147,7 @@ module_status() {
 module_audit() {
     local bouncers collections missing=""
 
-    if ! config_bool INSTALL_CROWDSEC; then
+    if ! module_switch_enabled INSTALL_CROWDSEC; then
         echo "info|CrowdSec mit Bouncer und Collections|INSTALL_CROWDSEC ist nicht gesetzt"
         return 0
     fi

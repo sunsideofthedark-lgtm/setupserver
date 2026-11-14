@@ -62,7 +62,7 @@ EOF
 module_main() {
     local ssh_port
 
-    if ! config_bool INSTALL_FAIL2BAN; then
+    if ! module_switch_enabled INSTALL_FAIL2BAN; then
         skip "INSTALL_FAIL2BAN ist nicht gesetzt - Fail2Ban wird nicht angefasst."
         return 1
     fi
@@ -133,7 +133,7 @@ module_status() {
 module_audit() {
     local jail_port
 
-    if ! config_bool INSTALL_FAIL2BAN; then
+    if ! module_switch_enabled INSTALL_FAIL2BAN; then
         echo "info|Fail2Ban mit aktivem sshd-Jail|INSTALL_FAIL2BAN ist nicht gesetzt"
         return 0
     fi
