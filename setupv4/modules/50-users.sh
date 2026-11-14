@@ -16,6 +16,11 @@
 # Exportiert für nachfolgende Module:
 #   NEW_USER    - der angelegte bzw. ausgewählte Admin-Benutzer
 #   LOGIN_USER  - der Benutzer, für den der SSH-Zugang einzurichten ist
+#   ADMIN_USER  - der Admin-Benutzer zur Laufzeit. Nachfolgende Module
+#                 (55-sftp-sudoers, 80-docker, 94-git-ssh) brauchen ihn zur
+#                 Laufzeit: ohne diesen Export wird z. B. "sftp-sudoers" als
+#                 "fehlende Konfiguration" übersprungen, obwohl der
+#                 Benutzer gerade angelegt wurde.
 #
 # Config:
 #   ADMIN_USER         - Benutzername des Admin-Accounts (Pflicht für nicht-interaktiv)
@@ -40,6 +45,11 @@ NEW_USER=""            # wird exportiert
 LOGIN_USER=""          # wird exportiert
 users_backup_created=0 # 1 = Backup-Benutzer wurde in diesem Lauf angelegt
 users_passphrase=""    # nur während der Schlüsselerzeugung, danach unset
+
+# ADMIN_USER setzt dieses Modul zur Laufzeit und exportiert es. Bewusst KEINE
+# Initialisierung an dieser Stelle: die Datei wird nach dem Laden der Config
+# gesourct - ein "ADMIN_USER=" hier würde den Config-Wert überschreiben und
+# den interaktiven Zweig (Benutzer selbst wählen) unerreichbar machen.
 
 # --- Hilfsfunktionen ---
 
@@ -887,6 +897,16 @@ module_main() {
         fi
     fi
 
+    # Der Admin-Benutzer steht jetzt fest - im Zweig "neu" (frisch angelegt)
+    # ebenso wie im Zweig "bestehend" (dort existiert der Benutzer bereits).
+    # ADMIN_USER wird deshalb an die nachfolgenden Module weitergegeben: sie
+    # prüfen die Variable zur Laufzeit (MODULE_REQUIRED_KEYS) und würden ohne
+    # diesen Export "sftp-sudoers" als "fehlende Konfiguration" überspringen.
+    # Ein in der Config gesetzter ADMIN_USER bleibt dabei unverändert -
+    # NEW_USER wurde oben genau aus diesem Wert initialisiert.
+    ADMIN_USER="$NEW_USER"
+    export ADMIN_USER
+
     case "$mode" in
         neu)
             users_create_new "$NEW_USER" || return $?
@@ -899,7 +919,7 @@ module_main() {
     # Für nachfolgende Module bereitstellen
     LOGIN_USER="$NEW_USER"
     export NEW_USER LOGIN_USER
-    debug "NEW_USER=$NEW_USER LOGIN_USER=$LOGIN_USER"
+    debug "NEW_USER=$NEW_USER LOGIN_USER=$LOGIN_USER ADMIN_USER=$ADMIN_USER"
 
     # Backup-Benutzer und geteiltes Verzeichnis
     users_setup_backup_user || return $?

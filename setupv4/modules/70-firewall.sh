@@ -23,6 +23,10 @@ MODULE_ORDER=70
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit" "netzwerk")
 
+# Konfigurationsdatei von ufw. Überschreibbar, damit die Tests die
+# IPv6-Logik prüfen können, ohne /etc/default/ufw anzufassen.
+FW_UFW_DEFAULTS="${FW_UFW_DEFAULTS:-/etc/default/ufw}"
+
 # Ermittelt den freizugebenden SSH-Port.
 # Reihenfolge: Config -> laufende sshd-Konfiguration -> 22.
 # In v3 kam der Port aus dem vorhergehenden SSH-Schritt; in v4 ist er eine
@@ -75,9 +79,9 @@ fw_configure_ufw() {
     info "Konfiguriere UFW-Firewall"
 
     # IPv6-Unterstützung in UFW aktivieren
-    if [ -f /etc/default/ufw ]; then
-        create_backup /etc/default/ufw
-        run_eval "sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw"
+    if [ -f "$FW_UFW_DEFAULTS" ]; then
+        create_backup "$FW_UFW_DEFAULTS"
+        run_eval "sed -i 's/IPV6=no/IPV6=yes/' \"$FW_UFW_DEFAULTS\""
         info "IPv6-Unterstützung in UFW aktiviert."
     fi
 
@@ -115,17 +119,35 @@ fw_configure_ufw() {
         info "Firewall: Zusatzports freigegeben ($(config_get FIREWALL_EXTRA_PORTS))."
     fi
 
+    # --- Firewall aktivieren ---
+    # Das Aktivieren muss VOR dem Reload passieren: "ufw --force reload"
+    # meldet bei einer noch nicht aktiven Firewall "Firewall not enabled
+    # (skipping reload)" und tut nichts. Wer zuerst neu anwendet und danach
+    # aktiviert, laesst die Firewall mit IPv4-only-Regeln stehen.
+    run_eval "ufw --force enable"
+
     # --- IPv6 wirksam machen ---
     # Das Setzen von IPV6=yes in /etc/default/ufw wirkt sich erst auf die
     # REGELN aus, die ufw neu schreibt. Bereits vorhandene Regeln bleiben
     # IPv4-only, bis ufw die Ruleset neu anwendet. Ohne dieses Reload laeuft
     # der Server mit einer Firewall, die IPv6 nicht abdeckt - bei
     # Dual-Stack genau die Haelfe, die niemand erwartet.
-    if [ -f /etc/default/ufw ] && grep -qE '^IPV6=yes' /etc/default/ufw 2>/dev/null; then
+    # Das Reload setzt eine aktive Firewall voraus - deshalb oben aktiviert.
+    if [ -f "$FW_UFW_DEFAULTS" ] && grep -qE '^IPV6=yes' "$FW_UFW_DEFAULTS" 2>/dev/null; then
         info "Wende Firewall-Regeln neu an (IPv4 und IPv6)..."
         run_eval "ufw --force reload"
-        if command -v ufw >/dev/null 2>&1 && [ "$DRY_RUN" != "1" ]; then
-            local v6_rules
+    fi
+
+    # --- IPv6-Abdeckung pruefen ---
+    # Die Pruefung liest den Zustand der Firewall und laeuft deshalb erst
+    # nach dem Aktivieren. Sie warnt nur, wenn die Firewall wirklich aktiv
+    # ist - bei einer inaktiven Firewall gibt es keine IPv6-Regeln, die
+    # man pruefen koennte, und die Warnung waere irrefuehrend.
+    if command -v ufw >/dev/null 2>&1 && [ "$DRY_RUN" != "1" ]; then
+        local fw_state v6_rules
+
+        fw_state="$(ufw status 2>/dev/null | head -n1)"
+        if printf '%s' "$fw_state" | grep -qi 'Status: active'; then
             # ufw schreibt IPv6-Regeln als "(v6)" - das alte Muster 'v6\.\|::\)'
             # war als BRE ungueltig ("Unmatched ) or \)") und lieferte deshalb
             # immer 0: die Warnung unten kam bei jedem Firewall-Zustand.
@@ -135,10 +157,11 @@ fw_configure_ufw() {
             else
                 warning "Keine IPv6-Regeln in der Firewall gefunden - bitte 'ufw status verbose' prüfen."
             fi
+        else
+            info "Firewall ist nicht aktiv (${fw_state:-Status unbekannt}) - IPv6-Abdeckung wird nicht geprueft."
         fi
     fi
 
-    run_eval "ufw --force enable"
     return 0
 }
 
