@@ -55,7 +55,7 @@ Optionen:
       --status           Status der gewählten Module prüfen
       --audit            Ist-Zustand gegen die Zielkonfiguration prüfen
       --check-reboot     Prüfen, ob ein Neustart nötig ist
-      --init             Beispielkonfiguration erzeugen
+      --init             Startkonfiguration config/setup.conf erzeugen
       --no-profile       Server-Profil config/servers/<hostname>.conf ignorieren
       --no-relocate      Nicht nach $SETUP_HOME umziehen, direkt hier laufen
   -h, --help             Diese Hilfe anzeigen
@@ -94,6 +94,20 @@ relocate_to_setup_home() {
         ""|"/"|"/etc"|"/usr"|"/var"|"/bin"|"/sbin"|"/lib"|"/home"|"/root")
             echo -e "${C_RED}[ERROR] Ungültiges SETUP_HOME: '$SETUP_HOME'${C_RESET}" >&2
             echo "        Das Ziel darf weder leer noch ein Systemverzeichnis sein." >&2
+            echo "        Mit --no-relocate direkt am aktuellen Ort laufen." >&2
+            return 1
+            ;;
+    esac
+
+    # Das Ziel muss ein absoluter Pfad sein. Sonst legt das Setup im
+    # Arbeitsverzeichnis ein Verzeichnis an - bei einem Pfad wie " " sogar
+    # eines, das nur aus einem Leerzeichen besteht. Solche Krümel landen
+    # später im Repository und storen jeden git-Aufruf.
+    case "$SETUP_HOME" in
+        /*) ;;
+        *)
+            echo -e "${C_RED}[ERROR] SETUP_HOME muss ein absoluter Pfad sein: '$SETUP_HOME'${C_RESET}" >&2
+            echo "        Beispiel: SETUP_HOME=/opt/serversetup" >&2
             echo "        Mit --no-relocate direkt am aktuellen Ort laufen." >&2
             return 1
             ;;
@@ -231,7 +245,7 @@ if [ -n "$CHECK_REBOOT" ]; then
     exit 1
 fi
 
-# --- Beispielkonfiguration erzeugen ---
+# --- Startkonfiguration erzeugen ---
 # Kommt nach der Modul-Discovery, damit die erzeugte Config auch wirklich
 # alle vorhandenen Module auflistet.
 config_set_defaults
@@ -244,19 +258,36 @@ if [ ${#AVAILABLE_MODULES[@]} -eq 0 ]; then
 fi
 
 if [ -n "$DO_INIT" ]; then
+    # --init erzeugt die Startkonfiguration unter $CONFIG_DIR/setup.conf -
+    # genau die Datei, die danach mit "--config config/setup.conf" geladen
+    # wird. Die versionierte Vorlage config/setup.conf.example bleibt
+    # unangetastet; sie wird bei der Verlagerung nur mitkopiert.
+    #
     # Der Rückgabewert zählt: config_write_example liefert 1, wenn die Datei
     # schon existiert und deshalb nichts geschrieben wurde.
-    config_write_example "$CONFIG_DIR/setup.conf.example" || exit 1
+    config_write_example "$CONFIG_DIR/setup.conf" || exit 1
     exit 0
 fi
 
 # --- Config laden ---
 if [ -n "$CLI_CONFIG" ]; then
-    if [ ! -f "$CLI_CONFIG" ]; then
-        error "Config-Datei nicht gefunden: $CLI_CONFIG"
+    # Relative Pfade werden aufgelöst: zuerst gegen das Arbeitsverzeichnis,
+    # aus dem der Benutzer gestartet hat, danach unter $SETUP_DIR und
+    # $CONFIG_DIR. Nach der Verlagerung liegt die Config in
+    # /opt/serversetup/config - der Aufruf "config/setup.conf" darf daran
+    # nicht scheitern.
+    CONFIG_PATH="$(config_resolve_path "$CLI_CONFIG")"
+    if [ -z "$CONFIG_PATH" ]; then
+        error "Config-Datei nicht gefunden: $(config_absolute_path "$CLI_CONFIG")"
+        echo "        Geprüfte Stellen:" >&2
+        config_candidate_paths "$CLI_CONFIG" | sed 's/^/          /' >&2
+        info "Hinweis: die Standardkonfiguration liegt unter $CONFIG_DIR/setup.conf"
         exit 1
     fi
-    config_load "$CLI_CONFIG" || exit 1
+    if [ "$CONFIG_PATH" != "$CLI_CONFIG" ]; then
+        info "Config '$CLI_CONFIG' im Arbeitsverzeichnis nicht gefunden - verwende: $CONFIG_PATH"
+    fi
+    config_load "$CONFIG_PATH" || exit 1
 else
     if [ -f "$CONFIG_DIR/setup.conf" ]; then
         info "Keine Config angegeben - verwende $CONFIG_DIR/setup.conf"

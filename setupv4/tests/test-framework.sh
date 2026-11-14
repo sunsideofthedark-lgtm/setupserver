@@ -102,6 +102,22 @@ if (cd "$SANDBOX_DIR" && SETUP_HOME=/etc bash ./setup.sh --list >/dev/null 2>&1)
 else
     pass "SETUP_HOME=/etc wird abgewiesen"
 fi
+
+# Ein relativer SETUP_HOME wuerde im Arbeitsverzeichnis ein Verzeichnis
+# anlegen - bei einem Pfad wie " " sogar eines, das nur aus einem
+# Leerzeichen besteht. Solche Krümel landen spaeter im Repository.
+if (cd "$SANDBOX_DIR" && SETUP_HOME="reiner-relative-pfad" bash ./setup.sh --list >/dev/null 2>&1); then
+    fail "Relativer SETUP_HOME wurde nicht abgewiesen"
+else
+    pass "Relativer SETUP_HOME wird abgewiesen"
+fi
+
+if [ -d "$SANDBOX_DIR/reiner-relative-pfad" ]; then
+    fail "Relativer SETUP_HOME hat ein Verzeichnis im Arbeitsverzeichnis angelegt"
+else
+    pass "Relativer SETUP_HOME legt nichts im Arbeitsverzeichnis an"
+fi
+
 if [ -d "$SANDBOX_HOME/lib" ] && [ -d "$SANDBOX_HOME/modules" ]; then
     pass "Bibliotheken und Module liegen in SETUP_HOME"
 else

@@ -173,6 +173,114 @@ git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev}"
     fi
 }
 
+# --- Pfadauflösung für --config ---
+# Ein relativer Pfad wird zuerst gegen das aktuelle Arbeitsverzeichnis
+# geprüft - das ist das Verzeichnis, aus dem der Benutzer setup.sh gestartet
+# hat. Danach wird unter $SETUP_DIR und $CONFIG_DIR gesucht.
+#
+# Warum das nötig ist: setup.sh verlagert sich nach /opt/serversetup und läuft
+# von dort weiter, das Arbeitsverzeichnis bleibt aber das des Aufruforts.
+# Der Aufruf "config/setup.conf" wird sonst gegen das alte Verzeichnis
+# aufgelöst und dort nicht gefunden - obwohl die Datei direkt daneben liegt.
+#
+# Gibt den gefundenen Pfad auf stdout aus und liefert 0 zurück. Wird nichts
+# gefunden, bleibt die Ausgabe leer und der Rückgabewert ist 1.
+config_resolve_path() {
+    local requested="$1"
+    local setup_dir="${SETUP_DIR:-}"
+    local config_dir="${CONFIG_DIR:-}"
+    local candidate
+    local -a candidates=()
+
+    [ -n "$requested" ] || return 1
+
+    # Absolute Pfade: es gibt nur eine mögliche Stelle.
+    case "$requested" in
+        /*)
+            [ -f "$requested" ] || return 1
+            printf '%s\n' "$requested"
+            return 0
+            ;;
+    esac
+
+    # 1. Relativ zum Arbeitsverzeichnis des Aufrufers
+    if [ -f "$requested" ]; then
+        printf '%s\n' "$requested"
+        return 0
+    fi
+
+    # 2. Relativ zum Setup- und zum Configverzeichnis
+    [ -n "$setup_dir" ] && candidates+=("$setup_dir/$requested")
+    [ -n "$config_dir" ] && candidates+=("$config_dir/$requested")
+    [ -n "$config_dir" ] && candidates+=("$config_dir/$(basename "$requested")")
+
+    if [ ${#candidates[@]} -gt 0 ]; then
+        for candidate in "${candidates[@]}"; do
+            if [ -f "$candidate" ]; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
+# Macht aus einem Pfad einen absoluten Pfad - für Fehlermeldungen, damit der
+# Benutzer sieht, wo genau gesucht wurde.
+config_absolute_path() {
+    local path="$1"
+
+    # Führendes "./" entfernen
+    while [ "${path#./}" != "$path" ]; do
+        path="${path#./}"
+    done
+
+    case "$path" in
+        /*) printf '%s\n' "$path" ;;
+        "")  printf '%s\n' "$PWD" ;;
+        *)  printf '%s\n' "$PWD/$path" ;;
+    esac
+}
+
+# Listet alle Stellen auf, an denen eine Config-Datei gesucht wird.
+config_candidate_paths() {
+    local requested="$1"
+    local setup_dir="${SETUP_DIR:-}"
+    local config_dir="${CONFIG_DIR:-}"
+    local candidate known
+    local -a candidates=()
+    local -a printed=()
+
+    case "$requested" in
+        /*)
+            printf '%s\n' "$requested"
+            return 0
+            ;;
+    esac
+
+    candidates+=("$(config_absolute_path "$requested")")
+    [ -n "$setup_dir" ] && candidates+=("$setup_dir/$requested")
+    [ -n "$config_dir" ] && candidates+=("$config_dir/$requested")
+    [ -n "$config_dir" ] && candidates+=("$config_dir/$(basename "$requested")")
+
+    # Doppelte Pfade nur einmal nennen
+    for candidate in "${candidates[@]}"; do
+        local duplicate=0
+        for known in "${printed[@]}"; do
+            if [ "$known" = "$candidate" ]; then
+                duplicate=1
+                break
+            fi
+        done
+        [ "$duplicate" -eq 1 ] && continue
+        printed+=("$candidate")
+        printf '%s\n' "$candidate"
+    done
+
+    return 0
+}
+
 # --- Laden ---
 config_load() {
     local file="$1"
@@ -364,7 +472,10 @@ config_summary() {
     fi
 }
 
-# --- Beispielkonfiguration erzeugen ---
+# --- Startkonfiguration erzeugen ---
+# Erzeugt $CONFIG_DIR/setup.conf - genau die Datei, die danach mit
+# "--config config/setup.conf" geladen wird. Existiert sie schon, wird sie
+# NICHT überschrieben: der Rückgabewert ist dann 1.
 config_write_example() {
     local target="$1"
 
@@ -385,12 +496,15 @@ config_write_example() {
 
     cat > "$target" << CONFEOF
 # ==============================================================================
-# setupv4 - Beispielkonfiguration
+# setupv4 - Startkonfiguration
 # ==============================================================================
-# Diese Datei ist normales Bash und wird gesourct - Bedingungen, Schleifen und
-# Variablen sind erlaubt. Einfach kopieren und anpassen:
+# Diese Datei ist config/setup.conf - anpassen und mit --config config/setup.conf
+# verwenden.
 #
-#   cp config/setup.conf.example config/setup.conf
+# Erzeugt mit: sudo bash setup.sh --init
+#
+# Die Datei ist normales Bash und wird gesourct - Bedingungen, Schleifen und
+# Variablen sind erlaubt.
 #
 # Pro Server lässt sich zusätzlich config/servers/<hostname>.conf anlegen,
 # die nach dieser Datei geladen wird und deren Werte gewinnen.
@@ -404,19 +518,34 @@ $module_list
 
 # --- Allgemein ---
 SETUP_ROLE="standard"
+SERVER_ROLE=""                # frei wählbare Rolle, z. B. "web"
 SERVER_HOSTNAME=""            # leer = aktuellen Hostnamen behalten
 TIMEZONE="Europe/Vienna"
+ADMIN_USER=""                 # Admin-Account, wird bei Bedarf angelegt
+BACKUP_DIR="/var/backups/serversetup"
 DISABLE_ROOT_LOGIN=true
 REBOOT_AT_END=false
+
+# --- Basissystem ---
+SYSTEM_UPDATE=true
+AUTO_UPDATES=true
+SET_HOSTNAME=true
+SET_TIMEZONE=true
 
 # --- SSH ---
 SSH_PORT=2222
 SSH_ALLOWED_USERS=""          # z. B. "sugo,deploy"
+# SSH nur ueber das NetBird-Interface erreichbar machen. Voraussetzung:
+# NetBird laeuft bereits - danach ist SSH nur noch im Mesh erreichbar.
+SSH_NETBIRD_ONLY=false
+SSH_KEY_TYPE="ed25519"
 
 # --- Benutzerverwaltung ---
 CREATE_BACKUP_USER=false
 DB_BACKUP_USER="dbbackup"
 CREATE_SHARED_DIR=false
+SHARED_DIR="/opt"
+SHARED_GROUP="opt-admins"
 # NOPASSWD-Regel fuer den sftp-server. Beachten: wer den SSH-Key haelt, kann
 # dann alle Dateien per SFTP als root lesen/schreiben/loeschen. Nur setzen,
 # wenn das eingesetzte Backup-Tool die sudo-Variante wirklich braucht.
@@ -427,10 +556,18 @@ FIREWALL_OPEN_WEB_PORTS=true
 FIREWALL_HOSTS_PANGOLIN=false
 FIREWALL_HOSTS_KOMODO=false
 FIREWALL_EXTRA_PORTS=""       # z. B. "51820/udp,21820/udp"
+# Docker-veroeffentlichte Ports laufen ueber die FORWARD-Kette, nicht ueber
+# INPUT - die ufw-Regeln greifen fuer sie NICHT. Das Audit-Modul
+# "docker-firewall" vergleicht die veroeffentlichten Ports mit der Firewall.
+FIREWALL_DOCKER_AUDIT=true    # Abweichungen immer melden
+FIREWALL_DOCKER_USER=false    # DOCKER-USER-Regeln setzen (nur iptables-Backend!)
+FIREWALL_DOCKER_PORTS=""      # Ports, die trotz Docker offen bleiben duerfen
+FIREWALL_DOCKER_EXT_IF="eth0" # externes Interface fuer die DOCKER-USER-Regeln
 
 # --- Software ---
 INSTALL_DOCKER=true
 INSTALL_NODEJS=false
+INSTALL_ZFS_ARC=false
 INSTALL_NGINX=false
 INSTALL_FAIL2BAN=true
 INSTALL_CROWDSEC=false
@@ -438,23 +575,92 @@ INSTALL_NETBIRD=false
 INSTALL_TAILSCALE=false
 INSTALL_KOMODO=false
 INSTALL_PANGOLIN=false
-INSTALL_GIT_SSH=false
+INSTALL_GIT_SSH=true
+INSTALL_NODE_EXPORTER=false
+INSTALL_CLAMAV=false
+INSTALL_OMNISIGHT=false
+
+# --- Monitoring- und Werkzeug-Pakete ---
+INSTALL_HTOP=false
+INSTALL_IOTOP=false
+INSTALL_NETHOGS=false
+INSTALL_NCUDU=false
+INSTALL_TMUX=false
+INSTALL_GIT=false
+INSTALL_ZIP=false
+INSTALL_DB_CLIENTS=false
+
+# --- System-Tuning ---
+TUNING_SYSCTL=true
+TUNING_SWAP=true
+TUNING_SWAP_SIZE="2G"
+TUNING_JOURNALD=true
+TUNING_JOURNALD_MAXUSE="200M"
+
+# --- Git-SSH ---
+# Domain fuer den SSH-Key-Kommentar - der Kommentar selbst ist immer
+# "<hostname>@<domain>", also auf su-001 z. B. su-001@sunriseing.dev
 GIT_KEY_COMMENT_DOMAIN="sunriseing.dev"
-# Pro Zeile ein Dienst: "<hostname>|<kurzname>|<eigener Block>|<Basis-URL>".
-# Forgejo-Domain an den eigenen Server anpassen oder die Zeile loeschen.
+GIT_SSH_USER=""               # leer = $ADMIN_USER oder root
+GIT_AUTHOR_NAME=""
+GIT_AUTHOR_EMAIL=""
+# Pro Zeile ein Git-Dienst: "<hostname>|<kurzname>|<eigener Block>|<Basis-URL>".
+# Der Key heisst ~/.ssh/id_ed25519_<kurzname>. "eigener Block" 1 = eigener
+# Key mit eigenem IdentityFile, 0 = generischer Key ohne ssh_config-Block.
+# Domain und Basis-URL je Dienst. Bei einer anderen Instanz anpassen oder
+# die Zeile loeschen.
 GIT_SSH_SERVICES="github.com|github|1|https://github.com
 git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev"
-INSTALL_CLAMAV=false
+# API-Token, um die oeffentlichen Keys automatisch zu registrieren. Pro Dienst
+# GIT_SSH_TOKEN_<DIENST> in GROSSBUCHSTABEN. Bewusst NICHT hier eintragen,
+# sondern ueber die Umgebung uebergeben:
+#   GIT_SSH_TOKEN_GITHUB=... GIT_SSH_TOKEN_FORGEJO=... sudo -E bash setup.sh --config ...
+#
+# Ohne Token bleibt der manuelle Weg: der oeffentliche Key wird ausgegeben und
+# muss in der Weboberflaeche hinterlegt werden.
+
+# --- NetBird ---
+NETBIRD_MGMT_URL=""
+NETBIRD_CONFIGURE=false
+# Setup-Key ist ein Secret - NICHT hier eintragen, sondern zur Laufzeit:
+#   NETBIRD_SETUP_KEY=... sudo -E bash setup.sh --config config/setup.conf
+#NETBIRD_SETUP_KEY=""
+
+# --- Komodo ---
+KOMODO_ENDPOINT=""
+# Passkey ist ein Secret - NICHT hier eintragen, sondern zur Laufzeit:
+#   KOMODO_PASSKEY=... sudo -E bash setup.sh --config config/setup.conf
+#KOMODO_PASSKEY=""
+
+# --- Pangolin ---
+# SPK ist ein Secret - NICHT hier eintragen, sondern zur Laufzeit:
+#   PANGOLIN_SPK=... sudo -E bash setup.sh --config config/setup.conf
+#PANGOLIN_SPK=""
+
+# --- Omnisight ---
+OMNISIGHT_URL="https://omnisight.sunriseing.dev"
+OMNISIGHT_ROLE="linux"
+# Leer = vom Modul aus OMNISIGHT_URL abgeleitet (Standard: <url>/agent/install.sh)
+OMNISIGHT_INSTALL_URL=""
+# Token ist ein Secret - NICHT hier eintragen, sondern zur Laufzeit:
+#   OMNISIGHT_TOKEN=... sudo -E bash setup.sh --config config/setup.conf
+#OMNISIGHT_TOKEN=""
 
 # --- Zot-Mirrors ---
 ZOT_MIRRORS=false
 ZOT_ENDPOINT="https://zot.sunriseing.dev"
 ZOT_USERNAME="admin"
+ZOT_DOCKER_LOGIN=true
 # API-Key NICHT hier zuweisen - eine leere Zuweisung wuerde den Wert aus der
 # Umgebung wieder ueberschreiben. Stattdessen zur Laufzeit uebergeben:
 #   ZOT_API_KEY=... sudo -E bash setup.sh --config config/setup.conf
 # oder via --set ZOT_API_KEY=...
 #ZOT_API_KEY=""
+
+# --- Wartung ---
+MAINTENANCE_DAILY_BACKUP=false
+MAINTENANCE_DISK_MONITOR=true
+MAINTENANCE_LOGROTATE=true
 
 # --- Beispiel:bedingte Konfiguration ---
 # if [[ "\$SETUP_ROLE" == "web" ]]; then
@@ -464,9 +670,19 @@ ZOT_USERNAME="admin"
 # if [[ "\$SETUP_ROLE" == "pangolin" ]]; then
 #     FIREWALL_EXTRA_PORTS="51820/udp,21820/udp"
 # fi
+
+# ==============================================================================
+# Vor dem ersten Lauf anpassen, dann:
+#
+#   sudo bash setup.sh --config config/setup.conf
+#
+# Vollstaendiger Pfad dieser Datei auf diesem Server:
+#
+#   $target
+# ==============================================================================
 CONFEOF
 
-    success "Beispielkonfiguration erstellt: $target"
+    success "Startkonfiguration erstellt: $target"
     info "Vor dem ersten Lauf anpassen, dann:"
     info "  sudo bash setup.sh --config $target"
 }
