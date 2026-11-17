@@ -229,12 +229,12 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 55 | `sftp-sudoers` | SFTP-Sudoers-Regel | System | `SFTP_SUDOERS`, `ADMIN_USER` |
 | 60 | `ssh-hardening` | SSH-Härtung | System | `SSH_PORT`, `DISABLE_ROOT_LOGIN`, `SSH_ALLOWED_USERS` |
 | 70 | `firewall` | Firewall | System | `FIREWALL_OPEN_WEB_PORTS`, `FIREWALL_EXTRA_PORTS`, … |
-| 71 | `docker-firewall` | Docker-Port-Audit | System | `FIREWALL_DOCKER_USER`, `FIREWALL_DOCKER_PORTS` |
 | 80 | `docker` | Docker + `daemon.json` | **Software** | `INSTALL_DOCKER` (Standard: an) |
+| 81 | `docker-firewall` | Docker-Port-Audit | System | `FIREWALL_DOCKER_USER`, `FIREWALL_DOCKER_PORTS` |
 | 82 | `zfs-arc` | ZFS ARC-Cache | **Software** | `INSTALL_ZFS_ARC` |
 | 84 | `nodejs` | Node.js / npm | **Software** | `INSTALL_NODEJS` |
 | 85 | `zot-mirrors` | Zot-Registry-Mirrors | **Software** | `ZOT_MIRRORS`, `ZOT_ENDPOINT`, `ZOT_API_KEY` |
-| 86 | `netbird` | NetBird Mesh-VPN | **Software** | `INSTALL_NETBIRD`, `NETBIRD_MGMT_URL`, `NETBIRD_SETUP_KEY` |
+| 86 | `netbird` | NetBird Mesh-VPN | **Software** | `INSTALL_NETBIRD`, `NETBIRD_MGMT_URL`, `NETBIRD_SETUP_KEY`, `NETBIRD_CONFIGURE` |
 | 87 | `fail2ban` | Fail2Ban | **Software** | `INSTALL_FAIL2BAN` |
 | 88 | `crowdsec` | CrowdSec + Bouncer | **Software** | `INSTALL_CROWDSEC` |
 | 89 | `nginx` | NGINX | **Software** | `INSTALL_NGINX` |
@@ -253,6 +253,22 @@ Die Spalte **Art** entscheidet, was im Software-Auswahlmenü erscheint: nur die
 Softwaremodule sind wählbar, die Systemmodule laufen immer mit.
 
 `--list` zeigt die Liste immer aktuell an, `--status` prüft den Zustand.
+
+### Was die Softwaremodule nach der Auswahl tun
+
+Eine Auswahl im Menü bedeutet mehr als „Paket installieren" — die Module
+fragen anschließend ihre Zugangsdaten ab:
+
+| Modul | Was nach der Auswahl passiert |
+|---|---|
+| `netbird` | Fragt Management-URL und Setup-Key ab und verbindet den Agenten. Ohne Setup-Key geht nur die Installation — der Agent tritt dann nicht bei. `NETBIRD_CONFIGURE=false` überspringt die Verbindung ganz. |
+| `zot-mirrors` | Meldet sich an der Registry an und **prüft den Mirror mit einem echten Pull**. Schlägt der fehl, wird die Mirror-Konfiguration zurückgerollt — ein defekter Mirror blockiert sonst jeden weiteren Image-Pull auf dem Server. |
+| `komodo`, `pangolin` | Fragen nach Onboarding-Key bzw. Site Provisioning Key. |
+| `git-ssh` | Fragt den API-Token je Git-Dienst ab. Ohne Token bleibt der manuelle Weg. |
+| `omnisight` | Prüft zuerst, ob das Installationsskript erreichbar ist, und fragt dann das Token ab. |
+
+Optionale Secrets lassen sich mit **Enter überspringen** — die Abfrage fragt
+sonst endlos nach.
 
 ### Wann läuft ein Modul?
 

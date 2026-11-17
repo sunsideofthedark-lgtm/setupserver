@@ -57,11 +57,47 @@ verify_docker_ipv6_enabled() {
     return 1
 }
 
-# Ping-Test in einem Container. $1 = Netzwerk (leer = Default), $2 = Ziel
+# Holt das Test-Image.
+#
+# Wichtig: Ein fehlgeschlagener Image-Pull und eine fehlgeschlagene
+# Netzwerkverbindung fuehren beide dazu, dass "docker run" nicht laeuft. Ohne
+# diese Trennung meldete der Test "IPv4-Verbindung nach auessen ist
+# fehlgeschlagen", obwohl das Problem der Registry-Mirror war - der Server
+# war dann zwar nicht falsch konfiguriert, die Meldung aber voellig falsch.
+#
+# Rueckgabe: 0 = Image vorhanden, 1 = Image nicht ladbar
+verify_docker_ensure_image() {
+    local image="$1"
+
+    if [ "$DRY_RUN" = "1" ]; then
+        echo -e "${C_MAGENTA}[DRY-RUN] docker pull ${image}${C_RESET}" >&2
+        return 0
+    fi
+
+    if docker image inspect "$image" >/dev/null 2>&1; then
+        debug "Test-Image ${image} ist bereits lokal vorhanden."
+        return 0
+    fi
+
+    info "Lade Test-Image ${image}..."
+    if docker pull "$image" >/dev/null 2>&1; then
+        success "Test-Image ${image} geladen."
+        return 0
+    fi
+
+    error "Test-Image ${image} konnte nicht geladen werden."
+    echo "     Der Konnektivitaetstest wird uebersprungen - die Ursache liegt beim"
+    echo "     Image-Pull (z. B. Registry-Mirror ohne dieses Image), NICHT beim Netzwerk."
+    return 1
+}
+
+# Ping-Test in einem Container. $1 = Netzwerk (leer = Default), $2 = Ziel,
+# $3 = Label, $4 = Protokoll (IPv4 oder IPv6)
 verify_docker_ping() {
     local network="$1"
     local target="$2"
     local label="$3"
+    local proto="${4:-IPv4}"
     local -a docker_args=()
 
     [ -n "$network" ] && docker_args=(--network "$network")
@@ -72,11 +108,11 @@ verify_docker_ping() {
     fi
 
     if docker run --rm "${docker_args[@]}" "$VERIFY_IMAGE" ping -c 3 "$target" >/dev/null 2>&1; then
-        success "  -> [${label}] IPv4-Verbindung nach außen ist erfolgreich!"
+        success "  -> [${label}] ${proto}-Verbindung nach außen ist erfolgreich!"
         return 0
     fi
 
-    error "  -> [${label}] IPv4-Verbindung nach außen ist fehlgeschlagen!"
+    error "  -> [${label}] ${proto}-Verbindung nach außen ist fehlgeschlagen!"
     return 1
 }
 
@@ -84,17 +120,22 @@ verify_docker_ping() {
 verify_docker_network() {
     local ipv6=0
 
+    # Ohne Test-Image sagt der Test nichts ueber die Konnektivitaet aus.
+    if ! verify_docker_ensure_image "$VERIFY_IMAGE"; then
+        return 1
+    fi
+
     if verify_docker_ipv6_enabled; then
         ipv6=1
     fi
 
     # --- Default Bridge ---
     info "Teste IPv4-Konnektivität (Default Bridge)..."
-    verify_docker_ping "" "$VERIFY_TEST_IPV4" "Default"
+    verify_docker_ping "" "$VERIFY_TEST_IPV4" "Default" "IPv4"
 
     if [ "$ipv6" = "1" ]; then
         info "Teste IPv6-Konnektivität (Default Bridge)..."
-        verify_docker_ping "" "$VERIFY_TEST_IPV6" "Default"
+        verify_docker_ping "" "$VERIFY_TEST_IPV6" "Default" "IPv6"
     else
         info "⏭️  Überspringe IPv6-Test (in daemon.json deaktiviert)"
     fi
@@ -103,12 +144,12 @@ verify_docker_network() {
     if [ "$DRY_RUN" = "1" ] || docker network inspect "$VERIFY_DOCKER_NETWORK" >/dev/null 2>&1; then
         echo ""
         info "Teste IPv4-Konnektivität ('${VERIFY_DOCKER_NETWORK}' Netzwerk)..."
-        verify_docker_ping "$VERIFY_DOCKER_NETWORK" "$VERIFY_TEST_IPV4" "$VERIFY_DOCKER_NETWORK" || \
+        verify_docker_ping "$VERIFY_DOCKER_NETWORK" "$VERIFY_TEST_IPV4" "$VERIFY_DOCKER_NETWORK" "IPv4" || \
             warning "Bitte überprüfen Sie Ihre Docker-Netzwerkkonfiguration und Firewall-Regeln."
 
         if [ "$ipv6" = "1" ]; then
             info "Teste IPv6-Konnektivität ('${VERIFY_DOCKER_NETWORK}' Netzwerk)..."
-            verify_docker_ping "$VERIFY_DOCKER_NETWORK" "$VERIFY_TEST_IPV6" "$VERIFY_DOCKER_NETWORK"
+            verify_docker_ping "$VERIFY_DOCKER_NETWORK" "$VERIFY_TEST_IPV6" "$VERIFY_DOCKER_NETWORK" "IPv6"
         fi
     else
         warning "Docker-Netzwerk '${VERIFY_DOCKER_NETWORK}' existiert nicht - Test wird übersprungen."

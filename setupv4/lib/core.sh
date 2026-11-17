@@ -209,9 +209,14 @@ ask_value() {
 }
 
 # Fragt ein Secret verdeckt ab (nie in History, nie im Log)
+#
+# $3 = "optional" - dann ist eine leere Eingabe erlaubt: Enter ueberspringt
+#      die Abfrage und der Aufrufer bekommt einen leeren Wert. Ohne diesen
+#      Parameter wird bei leerer Eingabe nachgefragt.
 ask_secret() {
     local prompt="$1"
     local varname="$2"
+    local optional="${3:-}"
     local input="" confirm_input=""
 
     while true; do
@@ -226,6 +231,13 @@ ask_secret() {
         fi
         echo "" >&2
         if [ -z "$input" ]; then
+            if [ "$optional" = "optional" ]; then
+                # Optionales Secret: eine leere Eingabe ist eine gueltige
+                # Antwort und ueberspringt die Abfrage.
+                printf -v "$varname" '%s' ""
+                debug "Optionales Secret '${varname}' wurde uebersprungen."
+                return 0
+            fi
             warning "Eingabe darf nicht leer sein."
             continue
         fi

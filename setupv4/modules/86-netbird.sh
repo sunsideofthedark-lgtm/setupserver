@@ -17,7 +17,10 @@
 # Config:
 #   INSTALL_NETBIRD     - NetBird installieren (Default false)
 #   INSTALL_TAILSCALE   - altes Tailscale stilllegen (Default false)
-#   NETBIRD_CONFIGURE   - Verbindung nach der Installation einrichten (Default false)
+#   NETBIRD_CONFIGURE   - Verbindung nach der Installation einrichten. Leer
+#                         (Default) = im interaktiven Lauf ja, im
+#                         nicht-interaktiven Lauf nein. "false" = immer
+#                         ueberspringen, "true" = immer verbinden.
 #   NETBIRD_MGMT_URL    - Management-URL (leer = NetBird Cloud / Nachfrage)
 #   NETBIRD_SETUP_KEY   - Setup-Key; Secret, besser über Umgebung oder --set
 # ==============================================================================
@@ -125,7 +128,7 @@ netbird_ask_credentials() {
         if [ "$NON_INTERACTIVE" = "1" ]; then
             info "Kein Setup-Key gesetzt - Verbindung wird ohne Setup-Key versucht."
         else
-            ask_secret "NetBird Setup-Key (optional, bleibt verborgen)" NB_SETUP_KEY || return 1
+            ask_secret "NetBird Setup-Key (optional, Enter überspringt, bleibt verborgen)" NB_SETUP_KEY optional || return 1
         fi
     fi
 
@@ -214,8 +217,30 @@ netbird_configure() {
     echo -e "${C_YELLOW}NetBird ermöglicht VPN-Verbindungen (auch mit eigenen Management-Servern).${C_RESET}"
     echo ""
 
-    if ! config_bool NETBIRD_CONFIGURE; then
-        info "NetBird-Konfiguration übersprungen. Später mit 'netbird up' konfigurieren."
+    # Soll verbunden werden?
+    #
+    # Der Schalter NETBIRD_CONFIGURE hat Vorrang, wenn er gesetzt ist. Ohne
+    # ihn wird im interaktiven Lauf verbunden - der Benutzer hat NetBird im
+    # Software-Menue gewaehlt, die Zugangsdaten koennen abgefragt werden und
+    # es waere widersinnig, NetBird zu installieren und dann unbenutzt
+    # stehen zu lassen. Im nicht-interaktiven Lauf wird ohne den Schalter
+    # nicht verbunden: dafuer fehlt das Secret, und ohne Setup-Key kann der
+    # Agent ohnehin nicht beitreten.
+    local do_connect=0
+    local cfg_value
+    cfg_value="$(config_get NETBIRD_CONFIGURE "")"
+
+    if [ -n "$cfg_value" ]; then
+        if config_bool NETBIRD_CONFIGURE; then
+            do_connect=1
+        fi
+    elif [ "$NON_INTERACTIVE" != "1" ]; then
+        do_connect=1
+    fi
+
+    if [ "$do_connect" = "0" ]; then
+        info "NetBird-Konfiguration übersprungen (kein Setup-Key im nicht-interaktiven Lauf)."
+        echo "     Später manuell: netbird up --management-url <url> --setup-key <key>"
         return 1
     fi
 

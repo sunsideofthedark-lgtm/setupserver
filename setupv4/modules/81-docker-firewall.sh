@@ -35,7 +35,10 @@
 MODULE_ID="docker-firewall"
 MODULE_NAME="Docker-Port-Audit"
 MODULE_DESC="Von Docker veroeffentlichte Ports gegen die Firewall-Regeln pruefen"
-MODULE_ORDER=71
+# Bewusst NACH dem Docker-Modul (80): der Audit prueft die von Docker
+# veroeffentlichten Ports. Laeuft er davor, gibt es auf einem frischen Server
+# noch kein Docker - das Modul wuerde immer uebersprungen.
+MODULE_ORDER=81
 MODULE_REQUIRED_KEYS=()
 MODULE_TAGS=("sicherheit" "docker" "firewall")
 

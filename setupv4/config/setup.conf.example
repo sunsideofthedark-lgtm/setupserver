@@ -22,8 +22,8 @@ MODULES=(
     sftp-sudoers
     ssh-hardening
     firewall
-    docker-firewall
     docker
+    docker-firewall
     zfs-arc
     nodejs
     zot-mirrors
@@ -108,6 +108,16 @@ INSTALL_NGINX=false
 INSTALL_FAIL2BAN=true
 INSTALL_CROWDSEC=false
 INSTALL_NETBIRD=false
+# Verbindung zum Management-Server. Leer (Default) = im interaktiven Lauf wird
+# nach Management-URL und Setup-Key gefragt und der Agent verbindet sich;
+# im nicht-interaktiven Lauf wird ohne Setup-Key uebersprungen.
+# "true" = immer verbinden, "false" = immer ueberspringen.
+#NETBIRD_CONFIGURE=""
+# Der Setup-Key ist ein Secret - hier bewusst NICHT eintragen, sondern zur
+# Laufzeit uebergeben:
+#   NETBIRD_SETUP_KEY=... sudo -E bash setup.sh --config config/setup.conf
+#NETBIRD_SETUP_KEY=""
+#NETBIRD_MGMT_URL="https://netbird.sunriseing.dev"
 INSTALL_TAILSCALE=false
 INSTALL_KOMODO=false
 INSTALL_PANGOLIN=false

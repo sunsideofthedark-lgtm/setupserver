@@ -301,6 +301,13 @@ select_modules_interactive() {
         if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
             start="${BASH_REMATCH[1]}"
             end="${BASH_REMATCH[2]}"
+            # Umgekehrter Bereich (11-3) waere sonst stillschweigend
+            # wirkungslos - siehe die gleiche Pruefung im Software-Menue.
+            if [ "$start" -gt "$end" ]; then
+                warning "Ungültiger Bereich: $part - der Start ist größer als das Ende."
+                echo "     Beispiel für 11 bis 13: 11-13"
+                continue
+            fi
             for ((m=start; m<=end; m++)); do
                 selected=$(echo "$list" | cut -d' ' -f"$m")
                 if [ -n "$selected" ]; then
@@ -444,6 +451,14 @@ select_software() {
                     if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                         start="${BASH_REMATCH[1]}"
                         end="${BASH_REMATCH[2]}"
+                        # Ein umgekehrter Bereich (11-3) waere sonst
+                        # stillschweigend wirkungslos - der Benutzer wuerde
+                        # denken, er haette etwas umgeschaltet.
+                        if [ "$start" -gt "$end" ]; then
+                            warning "Ungültiger Bereich: $part - der Start ist größer als das Ende."
+                            echo "     Beispiel für 11 bis 13: 11-13"
+                            continue
+                        fi
                         for ((m = start; m <= end; m++)); do
                             nums+=("$m")
                         done

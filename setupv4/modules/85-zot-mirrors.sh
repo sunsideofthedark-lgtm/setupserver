@@ -46,6 +46,10 @@ ZOT_REGISTRIES=(
 ZOT_CERTS_DIR="/etc/docker/certs.d"
 ZOT_DAEMON_JSON="/etc/docker/daemon.json"
 
+# Image fuer die Verifikation des Mirrors. Klein und ueberall verfuegbar -
+# busybox:latest ist rund 2 MB gross und liegt praktisch in jeder Registry.
+ZOT_VERIFY_IMAGE="busybox:latest"
+
 # Entfernt führende/abschließende Schrägstriche. Das http(s)://-Schema bleibt
 # erhalten, da es in der hosts.toml zwingend benötigt wird.
 zot_normalize_endpoint() {
@@ -145,6 +149,32 @@ ZOTPYEOF
     return 1
 }
 
+# Entfernt die Mirror-Konfiguration wieder.
+#
+# Wird gebraucht, wenn die Verifikation zeigt, dass der Mirror keine Images
+# liefert: dann wuerde jeder weitere Pull auf dem Server ueber den Mirror
+# laufen und fehlschlagen - der Server koennte keine Images mehr ziehen.
+zot_remove_mirrors() {
+    local item domain target_dir target_file removed=0
+
+    for item in "${ZOT_REGISTRIES[@]}"; do
+        IFS="|" read -r domain _ _ <<< "$item"
+        target_dir="${ZOT_CERTS_DIR}/${domain}"
+        target_file="${target_dir}/hosts.toml"
+        if [ -f "$target_file" ]; then
+            rm -f "$target_file" 2>/dev/null && removed=$((removed + 1))
+            rmdir "$target_dir" 2>/dev/null
+        fi
+    done
+
+    if [ "$removed" -gt 0 ]; then
+        success "Mirror-Konfiguration entfernt (${removed} Dateien) - Images werden wieder direkt geholt."
+    else
+        debug "Keine Mirror-Dateien zum Entfernen vorhanden."
+    fi
+    return 0
+}
+
 module_main() {
     local endpoint hostname username api_key item domain upstream prefix
     local target_dir target_file do_login=0
@@ -209,7 +239,7 @@ module_main() {
         warning "Kein Zot-API-Key gesetzt (Config, Umgebung oder --set)."
         if [ "$NON_INTERACTIVE" = "1" ]; then
             skip "docker login wird übersprungen - nicht-interaktiver Modus ohne Secret."
-        elif ! ask_secret "Zot-API-Key (bleibt verborgen)" api_key; then
+        elif ! ask_secret "Zot-API-Key (optional, Enter überspringt, bleibt verborgen)" api_key optional; then
             return 2
         else
             ZOT_API_KEY="$api_key"
@@ -278,7 +308,31 @@ EOFZOT
 
     echo ""
     success "Zot-Registry-Mirrors eingerichtet."
-    info "Verifikation: docker pull ghcr.io/linuxserver/nginx:latest"
+
+    # --- Verifikation ---
+    # Der Mirror muss wirklich Images liefern. Ist das nicht der Fall, laeuft
+    # jeder kuenftige Pull ueber den Mirror und schlaegt fehl - der Server
+    # koennte dann gar keine Images mehr ziehen. Deshalb wird hier ein echter
+    # Pull getestet und im Fehlerfall die Konfiguration zurueckgerollt.
+    if [ "$DRY_RUN" != "1" ]; then
+        echo ""
+        info "Verifiziere den Mirror mit einem Test-Pull (${ZOT_VERIFY_IMAGE})..."
+        if docker pull "$ZOT_VERIFY_IMAGE" >/dev/null 2>&1; then
+            success "Mirror funktioniert - Test-Pull erfolgreich."
+        else
+            error "Test-Pull fehlgeschlagen - der Mirror liefert keine Images."
+            echo "     Ursache ist meist eines von:"
+            echo "       * der Sync-Job auf der Zot-Instanz laeuft nicht oder haengt"
+            echo "       * der API-Key hat keine Leseberechtigung fuer das Repository"
+            echo "       * der Pfad-Prefix passt nicht zur Sync-Konfiguration (${ZOT_REGISTRIES[0]})"
+            warning "Die Mirror-Konfiguration wird zurueckgerollt, damit der Server"
+            echo "     weiterhin Images ziehen kann."
+            zot_remove_mirrors
+            return 2
+        fi
+    fi
+
+    info "Weitere Images pruefen Sie mit: docker pull ghcr.io/linuxserver/nginx:latest"
     return 0
 }
 
