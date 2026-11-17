@@ -697,7 +697,11 @@ git.sunriseing.dev|forgejo|1|https://git.sunriseing.dev"
 
 # --- NetBird ---
 NETBIRD_MGMT_URL=""
-NETBIRD_CONFIGURE=false
+# Verbindung zum Management-Server. Leer = im interaktiven Lauf wird nach
+# Management-URL und Setup-Key gefragt und der Agent verbindet sich; im
+# nicht-interaktiven Lauf wird uebersprungen.
+# "true" = immer verbinden, "false" = immer ueberspringen.
+#NETBIRD_CONFIGURE=""
 # Setup-Key ist ein Secret - NICHT hier eintragen, sondern zur Laufzeit:
 #   NETBIRD_SETUP_KEY=... sudo -E bash setup.sh --config config/setup.conf
 #NETBIRD_SETUP_KEY=""

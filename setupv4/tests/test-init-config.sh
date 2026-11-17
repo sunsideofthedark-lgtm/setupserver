@@ -93,4 +93,35 @@ else
     fail ".gitignore fehlt in setupv4"
 fi
 
+section "6. Erzeugte Config legt keine Schalter unerwartet fest"
+
+# Regression: die erzeugte Datei setzte NETBIRD_CONFIGURE=false. Da die
+# Config-Datei spaeter gesourct wird, hat sie den Default damit ueberschrieben
+# - NetBird wurde installiert, aber nie verbunden. Der Schalter darf deshalb
+# nicht aktiv gesetzt sein.
+if [ -f "$GENERATED" ]; then
+    content="$(cat "$GENERATED")"
+
+    if printf '%s\n' "$content" | grep -qE '^[[:space:]]*NETBIRD_CONFIGURE='; then
+        fail "Erzeugte Config setzt NETBIRD_CONFIGURE aktiv - der Auto-Anschluss waere aus"
+    else
+        pass "Erzeugte Config setzt NETBIRD_CONFIGURE nicht aktiv"
+    fi
+
+    if printf '%s\n' "$content" | grep -qE '^#NETBIRD_CONFIGURE='; then
+        pass "NETBIRD_CONFIGURE ist in der Vorlage auskommentiert vorhanden"
+    else
+        fail "NETBIRD_CONFIGURE fehlt in der Vorlage - der Default ist nicht erkennbar"
+    fi
+
+    # Die Secrets duerfen nie im Klartext in der Config stehen.
+    if printf '%s\n' "$content" | grep -qE '^[[:space:]]*(NETBIRD_SETUP_KEY|ZOT_API_KEY|KOMODO_PASSKEY|PANGOLIN_SPK|OMNISIGHT_TOKEN)="[^"]+'; then
+        fail "Erzeugte Config enthaelt ein Secret im Klartext"
+    else
+        pass "Erzeugte Config enthaelt keine Secrets im Klartext"
+    fi
+else
+    fail "Voraussetzung fehlt: $GENERATED wurde nicht erzeugt"
+fi
+
 test_summary
