@@ -56,9 +56,16 @@ Optionen:
       --audit            Ist-Zustand gegen die Zielkonfiguration prüfen
       --check-reboot     Prüfen, ob ein Neustart nötig ist
       --init             Startkonfiguration config/setup.conf erzeugen
+      --tui              Terminal-Oberfläche erzwingen
+      --no-tui           Klassische Textausgabe statt der Oberfläche
       --no-profile       Server-Profil config/servers/<hostname>.conf ignorieren
       --no-relocate      Nicht nach $SETUP_HOME umziehen, direkt hier laufen
   -h, --help             Diese Hilfe anzeigen
+
+Ohne Optionen startet im Terminal die Vollbild-Oberflaeche: zuerst eine
+Checkliste zum Auswaehlen der Software, danach ein Live-Dashboard mit
+Fortschrittsbalken und Logfenster. Ohne Terminal (cron, Ansible, CI) laeuft
+der klassische Textpfad.
 
 Umgebungsvariablen:
   SETUP_HOME=/opt/serversetup   Zielverzeichnis für Script und Logs
@@ -152,6 +159,19 @@ SHOW_AUDIT=""
 CHECK_REBOOT=""
 USE_PROFILE=1
 DO_RELOCATE=1
+DO_TUI=0
+
+# Der Kindprozess der Oberflaeche fuehrt das Setup ohne weitere Oberflaeche
+# aus - die Auswahl steht bereits in der Umgebung.
+# Wichtig: Der Elternprozess exportiert SETUPV4_TUI_CHILD - der Name muss
+# hier derselbe sein, sonst erkennt das Kind sich nicht als Kind.
+TUI_CHILD="${SETUPV4_TUI_CHILD:-0}"
+
+# Die Oberflaeche ist der Default, sobald ein Terminal zur Verfuegung steht.
+# Ohne Terminal (cron, Ansible, CI) bleibt der klassische Textpfad.
+if [ "$TUI_CHILD" != "1" ] && [ -t 0 ] && [ -t 1 ]; then
+    DO_TUI=1
+fi
 
 # Argumente vormerken: die Parse-Schleife unten arbeitet mit shift und würde
 # "$@" danach leeren. Für die Verlagerung brauchen wir aber genau die
@@ -173,6 +193,8 @@ while [ $# -gt 0 ]; do
       --audit)            SHOW_AUDIT=1; shift ;;
         --check-reboot)     CHECK_REBOOT=1; shift ;;
         --init)             DO_INIT=1; shift ;;
+        --tui)              DO_TUI=1; shift ;;
+        --no-tui)           DO_TUI=0; shift ;;
         -h|--help)          usage; exit 0 ;;
         *)                  echo "Unbekannte Option: $1" >&2; usage; exit 1 ;;
     esac
@@ -215,7 +237,7 @@ chmod 600 "$LOGFILE" 2>/dev/null || true
 # --- Bibliotheken laden ---
 # Reihenfolge ist bedeutsam: core definiert die Ausgabe-Funktionen, auf die
 # sich die anderen beiden beim Laden beziehen.
-for lib in core os config modules; do
+for lib in core os config modules tui; do
     if [ ! -f "$LIB_DIR/$lib.sh" ]; then
         echo "[ERROR] Bibliothek fehlt: $LIB_DIR/$lib.sh" >&2
         exit 1
@@ -329,9 +351,35 @@ if [ -n "$SHOW_LIST" ]; then
     exit 0
 fi
 
+# --- Oberflaeche (TUI) ---
+# Der Elternprozess uebernimmt die Auswahl und startet das Setup als Kind.
+# Das Kind laeuft mit TUI_CHILD=1 und ueberspringt die Menues - die Auswahl
+# steht bereits in den Schalter-Variablen der Umgebung.
+if [ "$DO_TUI" = "1" ] && [ "$TUI_CHILD" != "1" ]; then
+    # ORIGINAL_ARGS, nicht "$@" - die Argument-Schleife hat "$@" bereits
+    # leer gepoppt. Ohne die Originalargumente laeuft das Kind ohne
+    # --config, ohne --dry-run und ohne Modulauswahl.
+    tui_main "${ORIGINAL_ARGS[@]}"
+    exit $?
+fi
+
 # --- Modulauswahl bestimmen ---
-resolve_module_selection "$CLI_MODULES"
-selection_rc=$?
+# Im Kindprozess der Oberflaeche kommt die Auswahl aus der Kommandozeile
+# oder aus der MODULES-Liste der Config. Gibt es keine davon, laufen alle
+# Module - das ist der Komplett-Setup-Ablauf der Oberflaeche.
+if [ "$TUI_CHILD" = "1" ]; then
+    resolve_module_selection "$CLI_MODULES"
+    selection_rc=$?
+    if [ $selection_rc -eq 2 ]; then
+        mapfile -t SELECTED_MODULES < <(
+            printf '%s\n' "${AVAILABLE_MODULES[@]}" | cut -d'|' -f2
+        )
+        selection_rc=0
+    fi
+else
+    resolve_module_selection "$CLI_MODULES"
+    selection_rc=$?
+fi
 
 if [ $selection_rc -eq 1 ]; then
     # Ungültige Auswahl - niemals stillschweigend auf etwas anderes ausweichen
@@ -402,6 +450,14 @@ fi
 
 [ ${#SELECTED_MODULES[@]} -eq 0 ] && fatal "Keine Module zum Ausführen ausgewählt."
 
+# --- Modulplan fuer die Oberflaeche ---
+# Der Elternprozess braucht die Liste, um die Tabelle zeichnen zu koennen -
+# er kennt die Auswahl des Kindes sonst nicht.
+if [ "$TUI_CHILD" = "1" ] && [ -n "${TUI_PROGRESS:-}" ]; then
+    printf 'plan|%s\n' "$(IFS='|'; echo "${SELECTED_MODULES[*]}")" \
+        >> "$TUI_PROGRESS" 2>/dev/null
+fi
+
 # --- Konfiguration prüfen ---
 if ! config_validate; then
     fatal "Konfiguration enthält Fehler - bitte korrigieren und erneut starten."
@@ -452,7 +508,9 @@ for m in "${SELECTED_MODULES[@]}"; do
 done
 
 # --- Sicherheitsabfrage ---
-if [ "$DRY_RUN" != "1" ]; then
+# Im Kindprozess der Oberflaeche ist die Auswahl bereits bestaetigt - eine
+# zweite Rueckfrage waere nur ein weiterer Text im Logfenster.
+if [ "$DRY_RUN" != "1" ] && [ "$TUI_CHILD" != "1" ]; then
     echo ""
     if ! ask_yes_no "Setup jetzt ausführen?" "y"; then
         skip "Abgebrochene Ausführung"

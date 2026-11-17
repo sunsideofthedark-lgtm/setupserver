@@ -6,7 +6,7 @@ Ein universelles Server-Setup-Skript zur Absicherung und Ersteinrichtung von Lin
 
 | | Verzeichnis | Einsatz |
 |---|---|---|
-| **v4 (modular)** | `setupv4/` | Neuerstand. Haupt-Script + 26 Module, Konfiguration per Datei, `--dry-run`, Selbstinstallation nach `/opt/serversetup`, Testsuite + CI |
+| **v4 (modular)** | `setupv4/` | Neuerstand. Haupt-Script + 28 Module, Konfiguration per Datei, `--dry-run`, Selbstinstallation nach `/opt/serversetup`, Terminal-Oberfläche, Testsuite + CI |
 | **v3 (monolith)** | `setupv3.sh` | Bestehendes System, läuft weiter |
 
 Für neue Deployments wird `setupv4` empfohlen — Details in [`setupv4/README.md`](setupv4/README.md).
@@ -17,6 +17,11 @@ cd setupserver/setupv4
 sudo bash setup.sh --init                  # Beispielkonfiguration erzeugen
 sudo bash setup.sh --config config/setup.conf
 ```
+
+Startet `setup.sh` in einem Terminal, öffnet sich eine **Vollbild-Oberfläche**:
+eine Checkliste zum Auswählen der Software, danach ein Live-Dashboard mit
+Fortschrittsbalken, Modultabelle und Logfenster. Ohne Terminal (cron,
+Ansible, CI) läuft der klassische Textpfad.
 
 Danach liegt alles fest unter `/opt/serversetup`, unabhängig davon, von wo
 das Script gestartet wurde:

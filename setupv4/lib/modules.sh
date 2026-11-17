@@ -561,6 +561,19 @@ validate_module_requirements() {
     return $errors
 }
 
+# Schreibt eine Fortschrittszeile fuer das TUI-Dashboard.
+#
+# Ohne laufende Oberflaeche (TUI_PROGRESS ist nicht gesetzt) passiert hier
+# nichts - der normale Betrieb ist unveraendert.
+tui_progress_event() {
+    local event="$1" module_id="$2" status="$3" duration="${4:-0}"
+
+    [ -n "${TUI_PROGRESS:-}" ] || return 0
+    printf '%s|%s|%s|%s\n' "$event" "$module_id" "$status" "$duration" \
+        >> "$TUI_PROGRESS" 2>/dev/null
+    return 0
+}
+
 run_module() {
     local module_id="$1"
     local name desc start_time end_time duration rc
@@ -579,8 +592,11 @@ run_module() {
     if ! validate_module_requirements "$module_id"; then
         skip "Modul '$module_id' übersprungen (fehlende Konfiguration)"
         MODULE_RESULTS+=("${module_id}|skip|0")
+        tui_progress_event "end" "$module_id" "skip" "0"
         return 0
     fi
+
+    tui_progress_event "start" "$module_id" "run" "0"
 
     start_time=$(date +%s)
     # "|| rc=$?" haelt den Aufruf in einem Bedingungskontext - dadurch
@@ -594,14 +610,17 @@ run_module() {
         0)
             success "Modul '$module_id' abgeschlossen (${duration}s)"
             MODULE_RESULTS+=("${module_id}|ok|${duration}")
+            tui_progress_event "end" "$module_id" "ok" "$duration"
             ;;
         1)
             skip "Modul '$module_id' nicht anwendbar (${duration}s)"
             MODULE_RESULTS+=("${module_id}|skip|${duration}")
+            tui_progress_event "end" "$module_id" "skip" "$duration"
             ;;
         *)
             error "Modul '$module_id' fehlgeschlagen (Exit $rc, ${duration}s)"
             MODULE_RESULTS+=("${module_id}|fehler|${duration}")
+            tui_progress_event "end" "$module_id" "fehler" "$duration"
             return 2
             ;;
     esac

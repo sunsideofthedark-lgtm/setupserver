@@ -213,7 +213,7 @@ section "1. Das Menue erscheint im Ablauf 'Komplettes Setup'"
 PTY_TIMEOUT=20
 run_pty $'1\nkeine\n' \
     "cd $SANDBOX_DIR && SETUP_HOME=$SANDBOX_HOME BACKUP_DIR=$SANDBOX_DIR/backups-e2e \
-     bash ./setup.sh --dry-run --no-relocate --no-profile"
+     bash ./setup.sh --dry-run --no-relocate --no-profile --no-tui"
 
 assert_contains "$PTY_OUTPUT" "Software-Auswahl" "Das Software-Menue wird gezeigt"
 assert_contains "$PTY_OUTPUT" "Welche Software soll eingerichtet werden?" \
@@ -421,7 +421,7 @@ EOF
 PTY_TIMEOUT=20
 run_pty $'1\n3\ny\n' \
     "cd $SANDBOX_DIR && SETUP_HOME=$SANDBOX_HOME BACKUP_DIR=$SANDBOX_DIR/backups-e2e-config \
-     bash ./setup.sh --dry-run --no-relocate --no-profile \
+     bash ./setup.sh --dry-run --no-relocate --no-profile --no-tui \
      --config $SANDBOX_DIR/software-run.conf"
 
 assert_contains "$PTY_OUTPUT" "Software-Auswahl" "Das Menue erscheint auch mit Config"

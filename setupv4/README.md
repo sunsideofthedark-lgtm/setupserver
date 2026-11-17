@@ -95,7 +95,59 @@ Welche Module ausführen?
 Ohne Terminal (cron, Ansible, CI) startet das Menü nicht — der Lauf bricht
 dann ab und verweist auf `--modules` bzw. `--non-interactive`, statt zu hängen.
 
-### Software-Auswahl
+### Terminal-Oberfläche
+
+Sobald ein Terminal zur Verfügung steht, startet das Setup mit einer
+**Vollbild-Oberfläche** — ohne externe Abhängigkeit, nur ANSI-Steuerzeichen
+(funktioniert über SSH in MobaXterm, PuTTY, tmux und jedem xterm-kompatiblen
+Terminal). Ohne Terminal (cron, Ansible, CI) läuft der klassische Textpfad.
+
+**Phase 1 — Auswahl.** Eine Checkliste der installierbaren Software:
+
+```
+  setupv4 · Software-Auswahl                    Host: su-010   22:34
+════════════════════════════════════════════════════════════════════
+
+  Welche Software soll eingerichtet werden?  (Enter = bestätigen)
+
+   1  [✓]  Docker                           docker
+   2  [ ]  Node.js                          nodejs
+   3  [ ]  Zot-Registry-Mirrors              zot-mirrors
+  ...
+
+  5 von 15 Paketen ausgewählt · 13 Systemmodule laufen immer mit
+
+  ↑↓ bewegen · Leertaste umschalten · Enter bestätigen · q abbrechen
+```
+
+**Phase 2 — Ausführung.** Ein Live-Dashboard mit Fortschrittsbalken, der
+Tabelle aller Module und einem Logfenster:
+
+```
+  setupv4 · Ausführung                         su-010   22:34:12   1m07s
+
+  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  8/28 Module
+
+  ✓  system-update        Systemaktualisierung        OK    69s
+  ✓  auto-updates         Automatische Updates         OK     2s
+  ▸  fail2ban             Fail2Ban                 läuft    12s
+  ○  crowdsec             CrowdSec                wartet     –
+
+  ── Log ──────────────────────────────────────────────────────────
+  [INFO] Installiere Fail2Ban...
+```
+
+Die Rückfragen der Module (Admin-Benutzername, Passphrase, Tokens) stehen
+unten im Logfenster und werden dort beantwortet — der Setup-Prozess liest
+sie direkt vom Terminal.
+
+**Phase 3 — Ergebnis.** Eine Karte mit dem Ergebnis je Modul und dem Hinweis
+auf das Logfile.
+
+Die beiden Optionen `--tui` und `--no-tui` stehen auch in der
+[Optionsübersicht](#optionen).
+
+### Software-Auswahl im Textmodus
 
 Punkt 1 („Komplettes Setup“) fragt zuerst ab, **welche Software** eingerichtet
 werden soll. Die Systemmodule (Systemupdate, Hostname, Zeitzone, Benutzer,
@@ -145,8 +197,7 @@ Die Softwaremodule, die nicht angehakt sind, erscheinen im Modulplan als
 
 | Option | Bedeutung |
 |--------|-----------|
-| `-c, --config <datei>` | Konfigurationsdatei laden |
-| `--modules <liste>` | Nur diese Module (`users,firewall`) |
+| `-c, --config <datei>` | Konfigurationsdatei laden || `--modules <liste>` | Nur diese Module (`users,firewall`) |
 | `--set KEY=WERT` | Einzelne Variable überschreiben, mehrfach möglich |
 | `-n, --dry-run` | Nichts ändern, nur anzeigen |
 | `-y, --yes` | Rückfragen automatisch mit Ja beantworten |
@@ -155,6 +206,8 @@ Die Softwaremodule, die nicht angehakt sind, erscheinen im Modulplan als
 | `--status` | Status der gewählten Module prüfen |
 | `--audit` | Ist-Zustand gegen die Zielkonfiguration prüfen |
 | `--init` | Startkonfiguration `config/setup.conf` erzeugen |
+| `--tui` | Terminal-Oberfläche erzwingen |
+| `--no-tui` | Klassische Textausgabe statt der Oberfläche |
 | `--no-profile` | Server-Profil ignorieren |
 | `--no-relocate` | Nicht nach `/opt/serversetup` umziehen |
 | `DEBUG=1` | Ausführliche Debug-Ausgabe |
