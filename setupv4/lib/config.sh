@@ -38,7 +38,7 @@ CONFIG_KNOWN_KEYS=(
     FIREWALL_EXTRA_PORTS
     FIREWALL_DOCKER_AUDIT FIREWALL_DOCKER_USER FIREWALL_DOCKER_PORTS
     FIREWALL_DOCKER_EXT_IF
-    INSTALL_DOCKER INSTALL_NODEJS INSTALL_TAILSCALE INSTALL_ZFS_ARC
+    INSTALL_DOCKER INSTALL_NODEJS NODEJS_MAJOR INSTALL_TAILSCALE INSTALL_ZFS_ARC
     INSTALL_NGINX INSTALL_FAIL2BAN INSTALL_CROWDSEC INSTALL_NODE_EXPORTER
     INSTALL_NCUDU INSTALL_HTOP INSTALL_IOTOP INSTALL_NETHOGS INSTALL_TMUX
     INSTALL_GIT INSTALL_ZIP INSTALL_DB_CLIENTS INSTALL_CLAMAV INSTALL_NETBIRD
@@ -105,6 +105,9 @@ config_set_defaults() {
     # Software-Menue des Setup bleibt es aber abwaehlbar.
     INSTALL_DOCKER="${INSTALL_DOCKER:-true}"
     INSTALL_NODEJS="${INSTALL_NODEJS:-false}"
+    # Major-Version der Node.js-LTS-Reihe festnageln (z. B. "22"). Leer =
+    # die aktuellste LTS wird zur Laufzeit ermittelt (Default).
+    NODEJS_MAJOR="${NODEJS_MAJOR:-}"
     INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-false}"
     INSTALL_ZFS_ARC="${INSTALL_ZFS_ARC:-false}"
     INSTALL_NGINX="${INSTALL_NGINX:-false}"
@@ -643,6 +646,10 @@ FIREWALL_DOCKER_EXT_IF="eth0" # externes Interface fuer die DOCKER-USER-Regeln
 # --- Software ---
 INSTALL_DOCKER=true
 INSTALL_NODEJS=false
+# Node.js: Leer = die aktuellste LTS wird zur Laufzeit ermittelt und
+# installiert. Eine Zahl nagelt eine feste Major-Version fest (z. B. "22"),
+# wenn eine Anwendung auf einer aelteren LTS bleiben muss.
+#NODEJS_MAJOR=""
 INSTALL_ZFS_ARC=false
 INSTALL_NGINX=false
 INSTALL_FAIL2BAN=true

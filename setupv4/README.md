@@ -285,7 +285,7 @@ Werte aus der Umgebung erscheinen im Log nur maskiert (`abcd****wxyz`).
 | 80 | `docker` | Docker + `daemon.json` | **Software** | `INSTALL_DOCKER` (Standard: an) |
 | 81 | `docker-firewall` | Docker-Port-Audit | System | `FIREWALL_DOCKER_USER`, `FIREWALL_DOCKER_PORTS` |
 | 82 | `zfs-arc` | ZFS ARC-Cache | **Software** | `INSTALL_ZFS_ARC` |
-| 84 | `nodejs` | Node.js / npm | **Software** | `INSTALL_NODEJS` |
+| 84 | `nodejs` | Node.js / npm | **Software** | `INSTALL_NODEJS`, `NODEJS_MAJOR` |
 | 85 | `zot-mirrors` | Zot-Registry-Mirrors | **Software** | `ZOT_MIRRORS`, `ZOT_ENDPOINT`, `ZOT_API_KEY` |
 | 86 | `netbird` | NetBird Mesh-VPN | **Software** | `INSTALL_NETBIRD`, `NETBIRD_MGMT_URL`, `NETBIRD_SETUP_KEY`, `NETBIRD_CONFIGURE` |
 | 87 | `fail2ban` | Fail2Ban | **Software** | `INSTALL_FAIL2BAN` |
@@ -315,6 +315,7 @@ fragen anschließend ihre Zugangsdaten ab:
 | Modul | Was nach der Auswahl passiert |
 |---|---|
 | `netbird` | Fragt Management-URL und Setup-Key ab und verbindet den Agenten. Ohne Setup-Key geht nur die Installation — der Agent tritt dann nicht bei. `NETBIRD_CONFIGURE=false` überspringt die Verbindung ganz. |
+| `nodejs` | Installiert die **aktuellste LTS** von Node.js — die Version wird zur Laufzeit ermittelt (nodejs.org/dist/index.json), nichts ist fest verdrahtet. Ist ein älteres Node installiert, fragt das Modul nach einem Update. `NODEJS_MAJOR=22` nagelt eine bestimmte Reihe fest. |
 | `zot-mirrors` | Meldet sich an der Registry an und **prüft den Mirror mit einem echten Pull**. Schlägt der fehl, wird die Mirror-Konfiguration zurückgerollt — ein defekter Mirror blockiert sonst jeden weiteren Image-Pull auf dem Server. |
 | `komodo`, `pangolin` | Fragen nach Onboarding-Key bzw. Site Provisioning Key. |
 | `git-ssh` | Fragt den API-Token je Git-Dienst ab. Ohne Token bleibt der manuelle Weg. |

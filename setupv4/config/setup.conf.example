@@ -104,6 +104,11 @@ FIREWALL_DOCKER_EXT_IF="eth0"  # externes Interface fuer die DOCKER-USER-Regeln
 # Docker-Port-Audit setzen es voraus. Im Auswahlmenue bleibt es abwaehlbar.
 INSTALL_DOCKER=true
 INSTALL_NODEJS=false
+# Node.js: Leer = die aktuellste LTS wird zur Laufzeit ermittelt und
+# installiert (die Version von NodeSource, die gerade LTS ist). Eine Zahl
+# nagelt eine feste Major-Version fest (z. B. "22"), wenn eine Anwendung
+# auf einer aelteren LTS bleiben muss.
+#NODEJS_MAJOR=""
 INSTALL_NGINX=false
 INSTALL_FAIL2BAN=true
 INSTALL_CROWDSEC=false
