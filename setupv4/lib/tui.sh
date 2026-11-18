@@ -602,15 +602,24 @@ tui_main() {
         return 1
     fi
 
+    # Bricht der Benutzer mit Strg+C ab, muss der alternative Bildschirmpuffer
+    # wiederhergestellt werden - sonst bleibt das Terminal im Vollbild
+    # haengen und der naechste Befehl schreibt in den falschen Puffer.
+    trap 'tui_alt_off' EXIT INT TERM
+
     # Phase 1: Software auswählen
     if ! tui_select_software; then
         skip "Abgebrochen - es wurde nichts geändert."
+        trap - EXIT INT TERM
         return 0
     fi
 
     # Phase 2: Setup als Kindprozess starten und das Dashboard zeigen
     tui_run_child "$@"
     rc=$?
+
+    trap - EXIT INT TERM
+    tui_alt_off
 
     return $rc
 }
